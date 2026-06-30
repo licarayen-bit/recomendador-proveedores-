@@ -367,7 +367,7 @@ function parseCruceRows(rows){
       if(!nonEmpty) break;                              // fin de la tabla (fila en blanco separadora)
       if(c0==="empresa" || c0==="gestor" || c0.indexOf("nueva usuaria")!==-1) break; // otra tabla
       const emp=G(cells,ci.empresa), suc=G(cells,ci.sucursal), ges=G(cells,ci.gestor);
-      if(emp){ empresa=emp; sucursal=""; if(ges) gestor=ges; }
+      if(emp){ empresa=emp; sucursal=suc||""; if(ges) gestor=ges; }
       else if(suc){ sucursal=suc; if(ges) gestor=ges; }
       else if(ges){ gestor=ges; }
       if(gestor) add(gestor, empresa, sucursal, G(cells,ci.residuo), G(cells,ci.correo), G(cells,ci.servicio), G(cells,ci.costo), G(cells,ci.costoNorm), G(cells,ci.unidad));
@@ -620,9 +620,15 @@ function renderComparativo(){
   (CUR_PROVS||[]).forEach(p=>{ (p.detalle||[]).forEach(r=>{ const n=parseCosto(r.costoNorm); if(n!=null) comp.push({ prov:p.s.name, rec:false, residuo:(r.residuo||'(sin residuo)'), unidad:(r.unidad||'(sin unidad)'), servicio:r.servicio||'', n }); }); });
   (RECS||[]).forEach(r=>{ if(r.monto!=null) comp.push({ prov:r.prov, rec:true, residuo:(r.residuo||'(sin residuo)'), unidad:(r.unidad||'(sin unidad)'), servicio:r.servicio||'', n:r.monto }); });
   if(!comp.length){ box.innerHTML=''; return; }
+  // Deduplicar entradas identicas
+  const _seenComp = new Set();
+  const compUniq = comp.filter(c=>{
+    const k = c.prov+"|"+c.residuo+"|"+c.servicio+"|"+c.n+"|"+c.unidad;
+    if(_seenComp.has(k)) return false; _seenComp.add(k); return true;
+  });
   let html='<h3>Comparativo de costos</h3>';
   const grupos={};
-  comp.forEach(c=>{ const key=c.residuo+' · '+c.unidad; (grupos[key]=grupos[key]||[]).push(c); });
+  compUniq.forEach(c=>{ const key=c.residuo+' · '+c.unidad; (grupos[key]=grupos[key]||[]).push(c); });
   Object.keys(grupos).sort((a,b)=>a.localeCompare(b)).forEach(g=>{
     const rows=grupos[g].slice().sort((a,b)=>a.n-b.n);
     const min=rows[0].n;
@@ -648,8 +654,19 @@ function proveedoresDeEmpresa(empresa){
     if(sucs.length){
       const entry = (CRUCE_READY && CRUCE[canonKey(s.name)]) ? CRUCE[canonKey(s.name)] : null;
       const ce = entry ? (entry.correo||"") : "";
-      const detalle = entry ? (entry.rows||[]).filter(r=>norm(r.empresa).indexOf(ne)!==-1 && (r.residuo||r.servicio||r.costo)) : [];
-      out.push({ s, sucursales: [...new Set(sucs)].filter(Boolean), correoSheet: ce, detalle });
+      const rawDetalle = entry ? (entry.rows||[]).filter(r=>norm(r.empresa).indexOf(ne)!==-1 && (r.residuo||r.servicio||r.costo)) : [];
+      const _seenDet = new Set();
+      const detalle = rawDetalle.filter(r=>{
+        const k = (r.empresa||"")+(r.sucursal||"")+(r.servicio||"")+(r.residuo||"")+(r.costoNorm||r.costo||"");
+        if(_seenDet.has(k)) return false; _seenDet.add(k); return true;
+      });
+      // Sucursales: si CRUCE no tiene sucursal, usar respaldo hardcodeado
+      let sucursales = [...new Set(sucs)].filter(Boolean);
+      if(!sucursales.length){
+        const hc = CLIENTES[norm(s.name)] || [];
+        hc.forEach(c=>{ if(norm(c[0]||"").indexOf(ne)!==-1 && c[1]) sucursales.push(c[1]); });
+      }
+      out.push({ s, sucursales, correoSheet: ce, detalle });
     }
   });
   return out;
@@ -709,7 +726,7 @@ function buildInforme(){
         html += '<div class="empgrp">'+esc(p.s.name)+'</div>';
         html += '<table><tr><th>Sucursal</th><th>Residuo</th><th>Servicio</th><th>Costo</th><th>Costo norm.</th><th>Unidad</th></tr>';
         p.detalle.forEach(r=>{
-          const loc = [r.empresa, r.sucursal].filter(Boolean).join(' / ') || '-';
+          const loc = r.sucursal || r.empresa || '-';
           html += '<tr><td>'+esc(loc)+'</td><td>'+esc(r.residuo||'-')+'</td><td>'+esc(r.servicio||'-')+'</td><td>'+esc(r.costo||'-')+'</td><td>'+esc(r.costoNorm||'-')+'</td><td>'+esc(r.unidad||'-')+'</td></tr>';
         });
         html += '</table>';
