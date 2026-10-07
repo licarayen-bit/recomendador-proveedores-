@@ -1,0 +1,69 @@
+/* Tarifas: usa las variables de color de index.html (--green, --blue, ...). */
+.topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+#authBox { font-size:12px; color:#475467; display:flex; align-items:center; gap:6px; }
+.auth-btn { padding:6px 12px; background:#fff; color:var(--blue-d); border:1px solid var(--sky); border-radius:8px; font-size:12.5px; font-weight:600; cursor:pointer; }
+.auth-mail { font-weight:600; color:#1c2128; }
+
+.tabs { display:flex; gap:4px; margin:0 0 12px; border-bottom:1px solid #e5e7eb; }
+.tabs button { background:none; border:none; border-bottom:3px solid transparent; padding:8px 14px; font-size:14px; font-weight:600; color:#667085; cursor:pointer; }
+.tabs button.on { color:var(--blue-d); border-bottom-color:var(--green); }
+
+.lnk { background:none; border:none; padding:2px 4px; color:var(--blue); cursor:pointer; font-size:12px; }
+.lnk:hover { text-decoration:underline; }
+.lnk.danger { color:#b42318; }
+.muted { color:#98a2b3; }
+.small { font-size:11.5px; }
+.warn { color:#b45309; }
+.num { text-align:right; white-space:nowrap; }
+
+.tar-controls { grid-template-columns:repeat(5, 1fr); }
+.tar-controls .estados { gap:16px; }
+.tar-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+.tar-actions .cbtn { margin-top:0; }
+.tar-actions .sec { background:#fff; color:var(--blue-d); border:1px solid var(--sky); }
+#ufInfo { margin-left:auto; font-size:12px; color:#667085; }
+
+.tgrupo { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px; margin-bottom:10px; }
+.tg-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.tg-tit { font-weight:700; color:#1c2128; font-size:13.5px; }
+.tg-stats { display:flex; gap:6px; flex-wrap:wrap; }
+.stat { font-size:11.5px; background:#e7f0fa; color:var(--blue-d); padding:2px 8px; border-radius:6px; font-weight:600; }
+.stat.muted { background:#f3f4f6; color:#667085; }
+
+.tscroll { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.ttar { border-collapse:collapse; width:100%; font-size:12.5px; min-width:640px; }
+.ttar th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#667085; border-bottom:1px solid #e5e7eb; padding:6px 8px; white-space:nowrap; }
+.ttar td { border-bottom:1px solid #f0f2f4; padding:7px 8px; vertical-align:top; }
+.ttar tr.best td { background:#f0fdf4; }
+.ttar tr.t-anterior td { color:#98a2b3; }
+.ttar tr.t-baja td { color:#98a2b3; text-decoration:line-through; }
+.ttar td.acc { white-space:nowrap; }
+.t-best { font-size:11px; color:var(--green-d); font-weight:700; }
+.t-alerta { display:inline-block; font-size:11px; font-weight:700; color:#92400e; background:#fef3c7; padding:1px 6px; border-radius:6px; cursor:help; }
+.t-det { cursor:help; color:var(--blue); font-weight:700; }
+.pill { font-size:10.5px; padding:1px 6px; border-radius:999px; background:#f3f4f6; color:#475467; font-weight:600; }
+.pill.p-activo { background:#dcfce7; color:#166534; }
+.pill.p-inactivo { background:#f3f4f6; color:#667085; }
+.pill.p-prospecto { background:#dbeafe; color:#1e40af; }
+
+.tmodal .modalinner { position:relative; max-width:760px; }
+.tm-x { position:absolute; top:10px; right:12px; background:none; border:none; font-size:18px; color:#98a2b3; cursor:pointer; }
+.tmodal h3 { margin:0 0 6px; color:var(--blue-d); padding-right:28px; }
+.tf-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-top:12px; }
+.tf-campo label { display:block; font-size:11px; font-weight:600; color:#667085; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+.tf-campo input, .tf-campo select, .tf-campo textarea, .tmodal textarea { width:100%; padding:8px 10px; border:1px solid #d0d5dd; border-radius:8px; font-size:13px; font-family:inherit; background:#fff; }
+.tf-campo input[readonly] { background:#f9fafb; color:#475467; }
+.tf-campo.span2 { grid-column:1/-1; }
+.tf-dos { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.tf-acc { display:flex; justify-content:flex-end; align-items:center; gap:10px; margin-top:14px; flex-wrap:wrap; }
+.tf-acc .cbtn { margin-top:0; }
+.tf-acc span { margin-right:auto; }
+.cbtn:disabled { opacity:.6; cursor:default; }
+
+@media (max-width:680px) {
+  .tar-controls { grid-template-columns:1fr 1fr; }
+  .tf-grid { grid-template-columns:1fr; }
+  .tmodal { padding:8px; }
+  .tmodal .modalinner { padding:18px 16px; }
+  #ufInfo { margin-left:0; width:100%; }
+}
