@@ -60,8 +60,27 @@
 .tf-acc span { margin-right:auto; }
 .cbtn:disabled { opacity:.6; cursor:default; }
 
+/* selector con "Otro" y multiselector */
+.otro-inp { margin-top:6px; }
+.tar-controls .span2 { grid-column:span 2; }
+.msel { display:flex; flex-direction:column; gap:6px; }
+.msel-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.msel-chips:empty { display:none; }
+.mchip { display:inline-flex; align-items:center; gap:4px; font-size:12px; background:#e7f0fa; color:var(--blue-d); padding:3px 4px 3px 9px; border-radius:999px; font-weight:600; }
+.mchip button { border:none; background:none; color:var(--blue-d); cursor:pointer; font-size:15px; line-height:1; padding:0 4px; border-radius:50%; }
+.mchip button:hover { background:#cfe0f5; }
+.msel select { width:100%; padding:8px 10px; border:1px solid #d0d5dd; border-radius:8px; font-size:13px; background:#fff; }
+.msel-otro { display:flex; gap:6px; align-items:center; }
+.msel-otro input { flex:1; }
+
+/* el proveedor paga al cliente */
+.t-paga { color:#047857; }
+.tgrupo.tg-paga { border-left:4px solid #10b981; }
+.pill.p-paga { background:#d1fae5; color:#047857; }
+
 @media (max-width:680px) {
   .tar-controls { grid-template-columns:1fr 1fr; }
+  .tar-controls .span2 { grid-column:1/-1; }
   .tf-grid { grid-template-columns:1fr; }
   .tmodal { padding:8px; }
   .tmodal .modalinner { padding:18px 16px; }

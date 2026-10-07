@@ -144,6 +144,8 @@ function prepararTarifa(t) {
   t.incluye_disposicion = siNo(t.incluye_disposicion);
   if (!t.region && t.comuna) t.region = regionDeComuna(t.comuna);
   t.provKey = tget(t, "proveedor_id") || "n:" + norm(t.proveedor_nombre);
+  t.tipo = tget(t, "tipo_transaccion").toLowerCase() === "paga" ? "paga" : "cobra";
+  t.sucursal = tget(t, "sucursal");
   return t;
 }
 
@@ -172,14 +174,15 @@ function clpDe(t) {
 }
 
 function grupoKey(t) {
-  return [norm(t.residuo), norm(t.unidad), norm(t.contenedor), t.incluye_transporte, t.incluye_disposicion, t.region || ""].join("|");
+  // "cobra" y "paga" nunca se comparan entre sí
+  return [t.tipo, norm(t.residuo), norm(t.unidad), norm(t.contenedor), t.incluye_transporte, t.incluye_disposicion, t.region || ""].join("|");
 }
 
-/** Por grupo comparable y por (proveedor, cliente), la más reciente es la vigente. */
+/** Por grupo comparable y por (proveedor, empresa, sucursal), la más reciente es la vigente. */
 function marcarVigentes(lista) {
   const ult = {};
   lista.forEach(t => {
-    const k = grupoKey(t) + "|" + t.provKey + "|" + norm(t.cliente);
+    const k = grupoKey(t) + "|" + t.provKey + "|" + norm(t.cliente) + "|" + norm(t.sucursal);
     const sello = tget(t, "fecha") + " " + tget(t, "actualizado_el");
     if (!ult[k] || sello > ult[k].sello) ult[k] = { t, sello };
   });
@@ -219,13 +222,71 @@ function tarifasDeProveedor(s) {
   return TARIFAS.filter(t => t.activo && (tget(t, "proveedor_id") ? t.proveedor_id === s.id : norm(t.proveedor_nombre) === norm(s.name)));
 }
 
+/* ---------------- controles: selector con "Otro" y multiselector ---------------- */
+function selOtroHtml(id, opciones, val, vacio) {
+  const opts = (opciones || []).slice();
+  if (val && !opts.some(o => o.toLowerCase() === String(val).toLowerCase())) opts.push(val);
+  return '<select id="' + id + '" onchange="selOtroCambio(\'' + id + '\')">' +
+    (vacio != null ? '<option value="">' + esc(vacio) + '</option>' : '') +
+    opts.map(o => '<option value="' + esc(o) + '"' + (val && o.toLowerCase() === String(val).toLowerCase() ? ' selected' : '') + '>' + esc(o) + '</option>').join('') +
+    '<option value="__otro">Otro (escribir)…</option></select>' +
+    '<input id="' + id + '_otro" class="otro-inp" placeholder="Escribe el nuevo valor" style="display:none">';
+}
+function selOtroCambio(id) {
+  const otro = document.getElementById(id).value === "__otro";
+  const i = document.getElementById(id + "_otro");
+  i.style.display = otro ? "" : "none";
+  if (otro) i.focus();
+}
+function selOtroVal(id) {
+  const s = document.getElementById(id);
+  return s.value === "__otro" ? document.getElementById(id + "_otro").value.trim() : s.value;
+}
+
+/* Multiselector: chips + desplegable. cfg = { opciones, valores, otro, unico, placeholder, onChange } */
+const MSEL = {};
+function mselHtml(id, cfg) {
+  MSEL[id] = Object.assign({ opciones: [], valores: [], otro: false, unico: false, placeholder: "+ agregar", onChange: null }, cfg);
+  MSEL[id].valores = (MSEL[id].valores || []).filter(Boolean);
+  return '<div class="msel" id="' + id + '">' + mselInner(id) + '</div>';
+}
+function mselInner(id) {
+  const m = MSEL[id];
+  const usados = m.valores.map(v => v.toLowerCase());
+  const disp = m.opciones.filter(o => usados.indexOf(o.toLowerCase()) === -1);
+  return '<div class="msel-chips">' + m.valores.map((v, i) => '<span class="mchip">' + esc(v) + '<button type="button" onclick="mselQuitar(\'' + id + '\',' + i + ')" aria-label="Quitar ' + esc(v) + '">×</button></span>').join('') + '</div>' +
+    '<select onchange="mselElegir(\'' + id + '\',this)" aria-label="' + esc(m.placeholder) + '"><option value="">' + esc(m.unico && m.valores.length ? "Cambiar…" : m.placeholder) + '</option>' +
+    disp.map(o => '<option value="' + esc(o) + '">' + esc(o) + '</option>').join('') +
+    (m.otro ? '<option value="__otro">Otro (escribir)…</option>' : '') + '</select>' +
+    (m.otro ? '<span class="msel-otro" style="display:none"><input placeholder="Nuevo valor" onkeydown="if(event.key===\'Enter\'){event.preventDefault();mselAgregarOtro(\'' + id + '\')}"><button type="button" class="lnk" onclick="mselAgregarOtro(\'' + id + '\')">Agregar</button></span>' : '');
+}
+function mselRender(id) { const el = document.getElementById(id); if (el && MSEL[id]) el.innerHTML = mselInner(id); }
+function mselElegir(id, selEl) {
+  const v = selEl.value; if (!v) return;
+  if (v === "__otro") { const sp = selEl.parentNode.querySelector(".msel-otro"); sp.style.display = ""; sp.querySelector("input").focus(); selEl.value = ""; return; }
+  mselAgregar(id, v);
+}
+function mselAgregar(id, v) {
+  const m = MSEL[id]; v = String(v || "").trim(); if (!v) return;
+  const canon = m.opciones.find(o => o.toLowerCase() === v.toLowerCase()) || v;
+  if (m.unico) m.valores = [canon];
+  else if (!m.valores.some(x => x.toLowerCase() === canon.toLowerCase())) m.valores.push(canon);
+  mselRender(id); if (m.onChange) m.onChange();
+}
+function mselAgregarOtro(id) { const i = document.querySelector("#" + id + " .msel-otro input"); if (i) mselAgregar(id, i.value); }
+function mselQuitar(id, i) { MSEL[id].valores.splice(i, 1); mselRender(id); if (MSEL[id].onChange) MSEL[id].onChange(); }
+function mselValores(id) { return MSEL[id] ? MSEL[id].valores.slice() : []; }
+function mselOpciones(id, opciones) { if (!MSEL[id]) return; MSEL[id].opciones = opciones; mselRender(id); }
+
 /* ---------------- render: vista Tarifas ---------------- */
 function precioHtml(t) {
   if (t.precio_num == null) return '<span class="muted">sin precio</span>';
-  const orig = t.moneda === "UF" ? fmtNum(t.precio_num) + " UF" : fmtCLP(t.precio_num);
+  const paga = t.tipo === "paga";
+  const orig = (paga ? "+" : "") + (t.moneda === "UF" ? fmtNum(t.precio_num) + " UF" : fmtCLP(t.precio_num));
   const clp = clpDe(t);
-  const conv = t.moneda === "UF" ? (clp != null ? '<div class="muted small">≈ ' + fmtCLP(clp) + '</div>' : '<div class="muted small">UF no disponible</div>') : "";
-  return '<b>' + orig + '</b>' + (t.unidad ? ' <span class="muted">/ ' + esc(t.unidad) + '</span>' : '') + conv;
+  const conv = t.moneda === "UF" ? (clp != null ? '<div class="muted small">≈ ' + (paga ? "+" : "") + fmtCLP(clp) + '</div>' : '<div class="muted small">UF no disponible</div>') : "";
+  return '<b class="' + (paga ? "t-paga" : "") + '">' + orig + '</b>' + (t.unidad ? ' <span class="muted">/ ' + esc(t.unidad) + '</span>' : '') + conv +
+    (paga ? '<div class="t-paga small">recibe el cliente</div>' : '');
 }
 
 function alertaHtml(t) {
@@ -234,15 +295,21 @@ function alertaHtml(t) {
 
 function siNoTxt(v, txt) { return v === "si" ? "con " + txt : v === "no" ? "sin " + txt : txt + " ¿?"; }
 
+function empresaHtml(t) {
+  return (t.cliente ? '<b>' + esc(t.cliente) + '</b>' : '<span class="muted">sin empresa</span>') +
+    (t.sucursal ? '<div class="small">' + esc(t.sucursal) + '</div>' : '') +
+    (t.estado_cliente ? ' <span class="pill p-' + esc(t.estado_cliente) + '">' + esc(t.estado_cliente) + '</span>' : '');
+}
+
 function filaTarifaHtml(t, opts) {
   opts = opts || {};
   const cant = [t.cantidad_min_num, t.cantidad_max_num].some(v => v != null)
     ? (t.cantidad_min_num != null ? fmtNum(t.cantidad_min_num) : "") + "–" + (t.cantidad_max_num != null ? fmtNum(t.cantidad_max_num) : "") : "";
   const lugar = [t.comuna || "", t.direccion && t.direccion !== t.comuna ? t.direccion : ""].filter(Boolean).join(" · ");
   return '<tr class="' + (t.activo ? "" : "t-baja ") + (t.vigente || !t.activo ? "" : "t-anterior ") + (opts.best ? "best" : "") + '">' +
-    (opts.sinProveedor ? '' : '<td><b>' + esc(t.proveedor_nombre || "-") + '</b>' + (opts.best ? ' <span class="t-best">★ menor</span>' : '') + '</td>') +
-    '<td>' + (t.cliente ? esc(t.cliente) : '<span class="muted">sin cliente</span>') + (t.estado_cliente ? ' <span class="pill p-' + esc(t.estado_cliente) + '">' + esc(t.estado_cliente) + '</span>' : '') + '</td>' +
-    (opts.conServicio ? '<td>' + esc(t.residuo || "-") + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td>' : '') +
+    (opts.sinProveedor ? '' : '<td><b>' + esc(t.proveedor_nombre || "-") + '</b>' + (opts.best ? ' <span class="t-best">★ ' + (t.tipo === "paga" ? "paga más" : "menor") + '</span>' : '') + '</td>') +
+    '<td>' + empresaHtml(t) + '</td>' +
+    (opts.conServicio ? '<td>' + esc(t.residuo || "-") + (t.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td>' : '') +
     '<td>' + esc(lugar || "-") + (cant ? '<div class="muted small">cant. ' + esc(cant) + '</div>' : '') + '</td>' +
     '<td class="num">' + precioHtml(t) + '</td>' +
     '<td><span class="small">' + esc(t.fecha || "-") + '</span><div class="muted small">' + esc(t.fuente || "") + (t.pdf_url ? ' · <a href="' + esc(t.pdf_url) + '" target="_blank" rel="noopener">PDF</a>' : '') + '</div></td>' +
@@ -256,38 +323,53 @@ function filaTarifaHtml(t, opts) {
     '</td></tr>';
 }
 
+const unicosOrdenados = vals => [...new Set(vals.map(v => String(v || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+
+function sucursalesDe(empresa) {
+  const ne = norm(empresa);
+  return unicosOrdenados(TARIFAS.filter(t => !ne || norm(t.cliente) === ne).map(t => t.sucursal));
+}
+
 function poblarFiltrosTarifas() {
   const set = (id, vals, todos) => {
     const el = document.getElementById(id); if (!el) return;
     const prev = el.value;
-    el.innerHTML = '<option value="">' + todos + '</option>' + [...new Set(vals.filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")).map(v => '<option>' + esc(v) + '</option>').join('');
+    el.innerHTML = '<option value="">' + todos + '</option>' + unicosOrdenados(vals).map(v => '<option>' + esc(v) + '</option>').join('');
     el.value = prev;
   };
-  set("tfResiduo", TARIFAS.map(t => t.residuo), "Todos");
   set("tfRegion", TARIFAS.map(t => t.region), "Todas");
   set("tfUnidad", TARIFAS.map(t => t.unidad), "Todas");
+  mselOpciones("tfResiduo", unicosOrdenados(TARIFAS.map(t => t.residuo)));
+  mselOpciones("tfComuna", unicosOrdenados(TARIFAS.map(t => t.comuna)));
   const dl = document.getElementById("clienteDL");
-  if (dl) dl.innerHTML = [...new Set(TARIFAS.map(t => tget(t, "cliente").trim()).filter(Boolean))].sort().map(c => '<option value="' + esc(c) + '">').join('');
-  ["residuo", "unidad", "contenedor"].forEach(c => {
-    const d = document.getElementById("cat_" + c + "DL");
-    if (d) d.innerHTML = (CATS[c] || []).map(v => '<option value="' + esc(v) + '">').join('');
-  });
+  if (dl) dl.innerHTML = unicosOrdenados(TARIFAS.map(t => t.cliente)).map(c => '<option value="' + esc(c) + '">').join('');
+  actualizarSucursalDL("tfSucursalDL", (document.getElementById("tfEmpresa") || {}).value);
+}
+
+function actualizarSucursalDL(dlId, empresa) {
+  const dl = document.getElementById(dlId);
+  if (dl) dl.innerHTML = sucursalesDe(empresa).map(s => '<option value="' + esc(s) + '">').join('');
 }
 
 function renderTarifas() {
   const box = document.getElementById("tarList"); if (!box) return;
   const g = id => (document.getElementById(id) || {}).value || "";
   const chk = id => !!(document.getElementById(id) || {}).checked;
-  const fRes = g("tfResiduo"), fReg = g("tfRegion"), fUni = g("tfUnidad"), fTxt = norm(g("tfTexto")), fEst = g("tfEstado");
+  const fRes = mselValores("tfResiduo").map(norm), fCom = mselValores("tfComuna").map(norm);
+  const fReg = g("tfRegion"), fUni = g("tfUnidad"), fEst = g("tfEstado"), fTipo = g("tfTipo");
+  const fEmp = norm(g("tfEmpresa")), fSuc = norm(g("tfSucursal")), fTxt = norm(g("tfTexto"));
   const verAnt = chk("tfAnteriores"), verBaja = chk("tfBajas"), soloAl = chk("tfAlertas");
 
   const ufInfo = document.getElementById("ufInfo");
   if (ufInfo) ufInfo.textContent = UF.valor ? "UF " + fmtCLP(UF.valor) + " (" + UF.fecha + ", " + UF.origen + ")" : "UF no disponible: los precios en UF no se convierten";
 
-  let lista = TARIFAS.filter(t => (t.activo || verBaja)
-    && (!fRes || t.residuo === fRes) && (!fReg || t.region === fReg) && (!fUni || t.unidad === fUni)
-    && (!fEst || t.estado_cliente === fEst)
-    && (!fTxt || norm(t.proveedor_nombre + " " + t.cliente).indexOf(fTxt) !== -1)
+  const lista = TARIFAS.filter(t => (t.activo || verBaja)
+    && (!fRes.length || fRes.indexOf(norm(t.residuo)) !== -1)
+    && (!fCom.length || fCom.indexOf(norm(t.comuna)) !== -1)
+    && (!fReg || t.region === fReg) && (!fUni || t.unidad === fUni)
+    && (!fEst || t.estado_cliente === fEst) && (!fTipo || t.tipo === fTipo)
+    && (!fEmp || norm(t.cliente).indexOf(fEmp) !== -1) && (!fSuc || norm(t.sucursal).indexOf(fSuc) !== -1)
+    && (!fTxt || norm(t.proveedor_nombre + " " + t.cliente + " " + t.sucursal).indexOf(fTxt) !== -1)
     && (!soloAl || (t.alertas && t.alertas.length))
     && (t.vigente || !t.activo || verAnt));
 
@@ -298,21 +380,22 @@ function renderTarifas() {
   lista.forEach(t => { (grupos[grupoKey(t)] = grupos[grupoKey(t)] || []).push(t); });
   const claves = Object.keys(grupos).sort((a, b) => {
     const ta = grupos[a][0], tb = grupos[b][0];
-    return (ta.residuo || "").localeCompare(tb.residuo || "", "es") || (ta.unidad || "").localeCompare(tb.unidad || "", "es");
+    return (ta.tipo || "").localeCompare(tb.tipo || "") || (ta.residuo || "").localeCompare(tb.residuo || "", "es") || (ta.unidad || "").localeCompare(tb.unidad || "", "es");
   });
 
   box.innerHTML = claves.map(k => {
     const ts = grupos[k];
     const t0 = ts[0];
-    const vig = ts.filter(t => t.vigente && t.activo);
-    const vals = vig.map(clpDe).filter(v => v != null && v > 1);
-    const min = vals.length ? Math.min(...vals) : null;
-    ts.sort((a, b) => (b.vigente - a.vigente) || ((clpDe(a) ?? 1e15) - (clpDe(b) ?? 1e15)) || String(b.fecha).localeCompare(String(a.fecha)));
-    const titulo = [t0.residuo || "(sin residuo)", t0.unidad ? "por " + t0.unidad : "(sin unidad)", t0.contenedor, siNoTxt(t0.incluye_transporte, "transporte"), siNoTxt(t0.incluye_disposicion, "disposición"), t0.region || "(sin región)"].filter(Boolean).join(" · ");
-    const stats = vals.length ? '<span class="stat">mín ' + fmtCLP(min) + '</span><span class="stat">mediana ' + fmtCLP(mediana(vals)) + '</span><span class="stat">máx ' + fmtCLP(Math.max(...vals)) + '</span><span class="stat muted">' + vals.length + ' vigente(s)</span>' : '';
-    return '<div class="tgrupo"><div class="tg-head"><div class="tg-tit">' + esc(titulo) + '</div><div class="tg-stats">' + stats + '</div></div>' +
-      '<div class="tscroll"><table class="ttar"><tr><th>Proveedor</th><th>Cliente</th><th>Lugar</th><th>Precio</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
-      ts.map(t => filaTarifaHtml(t, { best: vals.length > 1 && t.vigente && t.activo && clpDe(t) === min })).join('') +
+    const paga = t0.tipo === "paga";
+    const vals = ts.filter(t => t.vigente && t.activo).map(clpDe).filter(v => v != null && v > 1);
+    // "Mejor": el más barato si el proveedor cobra; el que más paga si el proveedor paga.
+    const mejor = vals.length ? (paga ? Math.max(...vals) : Math.min(...vals)) : null;
+    ts.sort((a, b) => (b.vigente - a.vigente) || (paga ? (clpDe(b) ?? -1) - (clpDe(a) ?? -1) : (clpDe(a) ?? 1e15) - (clpDe(b) ?? 1e15)) || String(b.fecha).localeCompare(String(a.fecha)));
+    const titulo = [paga ? "PAGA" : "", t0.residuo || "(sin residuo)", t0.unidad ? "por " + t0.unidad : "(sin unidad)", t0.contenedor, siNoTxt(t0.incluye_transporte, "transporte"), siNoTxt(t0.incluye_disposicion, "disposición"), t0.region || "(sin región)"].filter(Boolean).join(" · ");
+    const stats = vals.length ? '<span class="stat">mín ' + fmtCLP(Math.min(...vals)) + '</span><span class="stat">mediana ' + fmtCLP(mediana(vals)) + '</span><span class="stat">máx ' + fmtCLP(Math.max(...vals)) + '</span><span class="stat muted">' + vals.length + ' vigente(s)</span>' : '';
+    return '<div class="tgrupo' + (paga ? " tg-paga" : "") + '"><div class="tg-head"><div class="tg-tit">' + esc(titulo) + '</div><div class="tg-stats">' + stats + '</div></div>' +
+      '<div class="tscroll"><table class="ttar"><tr><th>Proveedor</th><th>Empresa / sucursal</th><th>Lugar</th><th>' + (paga ? "Paga al cliente" : "Precio") + '</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
+      ts.map(t => filaTarifaHtml(t, { best: vals.length > 1 && t.vigente && t.activo && clpDe(t) === mejor })).join('') +
       '</table></div></div>';
   }).join('');
 }
@@ -322,7 +405,7 @@ function tarifasResumenProveedor(s) {
   const ts = tarifasDeProveedor(s);
   if (!ts.length) return "";
   const n = ts.filter(t => t.alertas && t.alertas.length).length;
-  const res = [...new Set(ts.map(t => t.residuo).filter(Boolean))].slice(0, 4).join(", ");
+  const res = unicosOrdenados(ts.map(t => t.residuo)).slice(0, 4).join(", ");
   return '<div class="meta"><b>Tarifas:</b> ' + ts.length + ' registrada(s)' + (res ? ' · ' + esc(res) : '') + (n ? ' · <span class="t-alerta">⚠ ' + n + '</span>' : '') + '</div>';
 }
 
@@ -332,7 +415,7 @@ function tarifasDetalleProveedor(s) {
   const head = '<div class="meta" style="margin-top:10px;"><b>Tarifas</b> <button class="lnk" onclick="abrirFormTarifa(null,{proveedor_nombre:' + esc(JSON.stringify(s.name)) + '})">+ Agregar tarifa</button></div>';
   if (!ts.length) return head + '<span class="toggle-hint">Sin tarifas registradas.</span>';
   ts.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
-  return head + '<div class="tscroll"><table class="ttar"><tr><th>Cliente</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
+  return head + '<div class="tscroll"><table class="ttar"><tr><th>Empresa / sucursal</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
     ts.map(t => filaTarifaHtml(t, { sinProveedor: true, conServicio: true })).join('') + '</table></div>';
 }
 
@@ -365,74 +448,87 @@ function sel(id, opts, val) { return '<select id="' + id + '">' + opts.map(o => 
 function abrirFormTarifa(id, prefill) {
   const t = id ? TARIFAS.find(x => x.id === id) : null;
   FORM_ORIG = t || null;
-  const v = Object.assign({ moneda: "CLP", fuente: "cotizacion", estado_cliente: "activo", fecha: new Date().toISOString().slice(0, 10) }, t || {}, prefill || {});
-  if (t) { v.precio = t.precio_num == null ? "" : t.precio_num; v.cantidad_min = t.cantidad_min_num ?? ""; v.cantidad_max = t.cantidad_max_num ?? ""; }
+  const v = Object.assign({ moneda: "CLP", fuente: "cotizacion", estado_cliente: "activo", tipo_transaccion: "cobra", fecha: new Date().toISOString().slice(0, 10) }, t || {}, prefill || {});
+  if (t) { v.precio = t.precio_num == null ? "" : t.precio_num; v.cantidad_min = t.cantidad_min_num ?? ""; v.cantidad_max = t.cantidad_max_num ?? ""; v.tipo_transaccion = t.tipo; }
+  const residuos = [].concat(v.residuos || v.residuo || []).filter(Boolean);
+  const comunas = [].concat(v.comunas || v.comuna || []).filter(Boolean).map(comunaCanonica);
   const sn = [["", "No se sabe"], ["si", "Sí"], ["no", "No"]];
+  const multi = !t; // al crear se pueden elegir varios residuos y comunas (una tarifa por combinación)
   abrirModal("tarifaModal",
     '<h3>' + (t ? "Editar tarifa" : "Nueva tarifa") + (FORM_COLA && FORM_COLA.length ? ' <span class="muted small">(' + FORM_COLA.length + ' pendiente(s) desde Claude)</span>' : '') + '</h3>' +
     (t ? '<div class="muted small">' + esc(t.id) + ' · creada por ' + esc(t.creado_por) + ' el ' + esc(t.creado_el) + '</div>' : '') +
     '<div class="tf-grid">' +
       campo("f_proveedor", "Proveedor *", inp("f_proveedor", v.proveedor_nombre, 'list="provDL" autocomplete="off"'), "span2") +
-      campo("f_cliente", "Cliente", inp("f_cliente", v.cliente, 'list="clienteDL" autocomplete="off" placeholder="Ej: COPEC"')) +
-      campo("f_estado_cliente", "Estado del cliente", sel("f_estado_cliente", [["", "-"]].concat(CATS.estado_cliente), v.estado_cliente)) +
-      campo("f_residuo", "Residuo *", inp("f_residuo", v.residuo, 'list="cat_residuoDL" autocomplete="off"')) +
-      campo("f_contenedor", "Contenedor / vehículo", inp("f_contenedor", v.contenedor, 'list="cat_contenedorDL" autocomplete="off"')) +
+      campo("f_tipo", "Tipo de transacción", sel("f_tipo", [["cobra", "Cobra: el cliente paga al proveedor"], ["paga", "Paga: el proveedor paga al cliente"]], v.tipo_transaccion)) +
+      campo("f_estado_cliente", "Estado del cliente", selOtroHtml("f_estado_cliente", CATS.estado_cliente, v.estado_cliente, "-")) +
+      campo("f_cliente", "Empresa", inp("f_cliente", v.cliente, 'list="clienteDL" autocomplete="off" placeholder="Ej: COPEC" oninput="actualizarSucursalDL(\'f_sucursalDL\', this.value)"')) +
+      campo("f_sucursal", "Sucursal", inp("f_sucursal", v.sucursal, 'list="f_sucursalDL" autocomplete="off" placeholder="Ej: PAD Maipú"') + '<datalist id="f_sucursalDL"></datalist>') +
+      campo("f_residuos", multi ? "Residuo(s) * <span class=\"muted\">· varios = una tarifa por cada uno</span>" : "Residuo *", mselHtml("f_residuos", { opciones: CATS.residuo || [], valores: residuos, otro: true, unico: !multi, placeholder: "+ elegir residuo" }), "span2") +
+      campo("f_contenedor", "Contenedor / vehículo", selOtroHtml("f_contenedor", CATS.contenedor, v.contenedor, "-")) +
+      campo("f_unidad", "Unidad de cobro", selOtroHtml("f_unidad", CATS.unidad, v.unidad, "-")) +
       campo("f_direccion", "Dirección del servicio", inp("f_direccion", v.direccion, 'placeholder="Calle, número, comuna" oninput="autoComuna()"'), "span2") +
-      campo("f_comuna", "Comuna", inp("f_comuna", v.comuna, 'list="comunaDL" autocomplete="off" oninput="autoRegion()"')) +
-      campo("f_region", "Región", '<input id="f_region" value="' + esc(v.region || regionDeComuna(v.comuna)) + '" readonly tabindex="-1">') +
-      campo("f_precio", "Precio neto (sin IVA)", inp("f_precio", v.precio, 'inputmode="decimal" placeholder="Ej: 192000 o 3,5"')) +
+      campo("f_comunas", multi ? "Comuna(s) <span class=\"muted\">· varias = una tarifa por cada una</span>" : "Comuna", mselHtml("f_comunas", { opciones: COMUNAS_LISTA, valores: comunas, unico: !multi, placeholder: "+ elegir comuna", onChange: autoRegion })) +
+      campo("f_region", "Región", '<input id="f_region" readonly tabindex="-1">') +
+      campo("f_precio", "Monto neto (sin IVA)", inp("f_precio", v.precio, 'inputmode="decimal" placeholder="Ej: 192000 o 3,5"')) +
       campo("f_moneda", "Moneda", sel("f_moneda", CATS.moneda, v.moneda)) +
-      campo("f_unidad", "Unidad de cobro", inp("f_unidad", v.unidad, 'list="cat_unidadDL" autocomplete="off" placeholder="kg, ton, m3, retiro…"')) +
       campo("f_cant", "Cantidad mín. – máx.", '<div class="tf-dos">' + inp("f_cantidad_min", v.cantidad_min, 'inputmode="decimal" placeholder="mín"') + inp("f_cantidad_max", v.cantidad_max, 'inputmode="decimal" placeholder="máx"') + '</div>') +
+      campo("f_fecha", "Fecha de la tarifa", '<input id="f_fecha" type="date" value="' + esc(v.fecha) + '">') +
       campo("f_incluye_transporte", "¿Incluye transporte?", sel("f_incluye_transporte", sn, v.incluye_transporte)) +
       campo("f_incluye_disposicion", "¿Incluye disposición?", sel("f_incluye_disposicion", sn, v.incluye_disposicion)) +
-      campo("f_fecha", "Fecha de la tarifa", '<input id="f_fecha" type="date" value="' + esc(v.fecha) + '">') +
-      campo("f_fuente", "Fuente", sel("f_fuente", CATS.fuente, v.fuente)) +
+      campo("f_fuente", "Fuente", selOtroHtml("f_fuente", CATS.fuente, v.fuente)) +
       campo("f_detalle", "Detalle del cobro (por qué cobra eso, condiciones)", '<textarea id="f_detalle" rows="3">' + esc(v.detalle || "") + '</textarea>', "span2") +
       campo("f_pdf", "PDF de la cotización", (v.pdf_url ? '<div class="small"><a href="' + esc(v.pdf_url) + '" target="_blank" rel="noopener">Ver PDF actual</a> · subir otro reemplaza el enlace</div>' : '') + '<input id="f_pdf" type="file" accept="application/pdf">' + '<input id="f_pdf_url" type="hidden" value="' + esc(v.pdf_url || "") + '">', "span2") +
     '</div>' +
     '<div class="tf-acc"><span id="f_status" class="muted small"></span>' +
       (FORM_COLA && FORM_COLA.length ? '<button class="lnk" onclick="siguienteDeCola()">Saltar esta</button>' : '') +
-      '<button class="cbtn" id="f_guardar" onclick="guardarTarifa()">' + (t ? "Guardar cambios" : "Guardar tarifa") + '</button></div>',
+      '<button class="cbtn" id="f_guardar" onclick="guardarTarifa()">' + (t ? "Guardar cambios" : "Guardar") + '</button></div>',
     () => { FORM_ORIG = null; FORM_COLA = null; });
+  actualizarSucursalDL("f_sucursalDL", v.cliente);
+  autoRegion();
 }
 
 function autoComuna() {
   const c = detectarComuna(document.getElementById("f_direccion").value);
-  const fc = document.getElementById("f_comuna");
-  if (c && (!fc.value || fc.dataset.auto === "1")) { fc.value = c; fc.dataset.auto = "1"; autoRegion(); }
+  if (c && !mselValores("f_comunas").length) mselAgregar("f_comunas", c);
 }
 function autoRegion() {
-  const fc = document.getElementById("f_comuna");
-  document.getElementById("f_region").value = regionDeComuna(fc.value);
+  const el = document.getElementById("f_region");
+  if (el) el.value = unicosOrdenados(mselValores("f_comunas").map(regionDeComuna)).join(", ");
 }
 
+/** Devuelve una tarifa por cada combinación residuo × comuna. */
 function leerFormulario() {
   const g = id => (document.getElementById(id).value || "").trim();
   const nombre = g("f_proveedor");
   const sup = SUPPLIERS.find(s => !s.sheetOnly && norm(s.name) === norm(nombre));
-  const comuna = comunaCanonica(g("f_comuna"));
-  const datos = {
+  const base = {
     proveedor_id: sup ? sup.id : "", proveedor_nombre: sup ? sup.name : nombre,
-    cliente: g("f_cliente"), estado_cliente: g("f_estado_cliente"),
-    residuo: g("f_residuo"), contenedor: g("f_contenedor"),
-    direccion: g("f_direccion"), comuna, region: regionDeComuna(comuna),
-    precio: g("f_precio") === "" ? "" : numDe(g("f_precio")), moneda: g("f_moneda"), unidad: g("f_unidad"),
+    tipo_transaccion: g("f_tipo"),
+    cliente: g("f_cliente"), sucursal: g("f_sucursal"), estado_cliente: selOtroVal("f_estado_cliente"),
+    contenedor: selOtroVal("f_contenedor"), unidad: selOtroVal("f_unidad"),
+    direccion: g("f_direccion"),
+    precio: g("f_precio") === "" ? "" : numDe(g("f_precio")), moneda: g("f_moneda"),
     cantidad_min: g("f_cantidad_min") === "" ? "" : numDe(g("f_cantidad_min")),
     cantidad_max: g("f_cantidad_max") === "" ? "" : numDe(g("f_cantidad_max")),
     incluye_transporte: g("f_incluye_transporte"), incluye_disposicion: g("f_incluye_disposicion"),
-    fecha: g("f_fecha"), fuente: g("f_fuente"), detalle: g("f_detalle"), pdf_url: g("f_pdf_url")
+    fecha: g("f_fecha"), fuente: selOtroVal("f_fuente"), detalle: g("f_detalle"), pdf_url: g("f_pdf_url")
   };
-  ["precio", "cantidad_min", "cantidad_max"].forEach(k => { if (datos[k] === null) throw new Error("Revisa el número en " + k.replace("_", " ") + "."); });
-  if (!datos.proveedor_nombre) throw new Error("Falta el proveedor.");
-  if (!datos.residuo) throw new Error("Falta el residuo.");
-  return { datos, enClickUp: !!sup };
+  ["precio", "cantidad_min", "cantidad_max"].forEach(k => { if (base[k] === null) throw new Error("Revisa el número en " + k.replace("_", " ") + "."); });
+  if (!base.proveedor_nombre) throw new Error("Falta el proveedor.");
+  const residuos = mselValores("f_residuos");
+  if (!residuos.length) throw new Error("Elige al menos un residuo.");
+  const comunas = mselValores("f_comunas");
+  const lista = [];
+  residuos.forEach(r => (comunas.length ? comunas : [""]).forEach(c => {
+    lista.push(Object.assign({}, base, { residuo: r, comuna: c, region: regionDeComuna(c) }));
+  }));
+  return { lista, enClickUp: !!sup };
 }
 
 async function asegurarCatalogos(datos) {
-  for (const c of ["residuo", "unidad", "contenedor"]) {
+  for (const c of ["residuo", "unidad", "contenedor", "estado_cliente", "fuente"]) {
     const v = datos[c]; if (!v) continue;
-    const existe = (CATS[c] || []).find(x => x.toLowerCase() === v.toLowerCase());
+    const existe = (CATS[c] || []).find(x => x.toLowerCase() === String(v).toLowerCase());
     if (existe) { datos[c] = existe; continue; }
     const r = await api("catalogo_agregar", { catalogo: c, valor: v }, true);
     datos[c] = r.valor; (CATS[c] = CATS[c] || []).push(r.valor);
@@ -453,23 +549,27 @@ async function subirPdfSiHay(inputId) {
 async function guardarTarifa() {
   const st = document.getElementById("f_status"), btn = document.getElementById("f_guardar");
   try {
-    const { datos, enClickUp } = leerFormulario();
-    if (!enClickUp && !FORM_ORIG && !confirm("“" + datos.proveedor_nombre + "” no está en ClickUp. ¿Guardar igual solo con el nombre?")) return;
+    const { lista, enClickUp } = leerFormulario();
+    if (!enClickUp && !FORM_ORIG && !confirm("“" + lista[0].proveedor_nombre + "” no está en ClickUp. ¿Guardar igual solo con el nombre?")) return;
+    if (lista.length > 1 && !confirm("Se crearán " + lista.length + " tarifas (una por cada residuo y comuna). ¿Continuar?")) return;
     btn.disabled = true; st.textContent = "Guardando…";
     if (!sesionActiva()) await iniciarSesion();
-    await asegurarCatalogos(datos);
-    const url = await subirPdfSiHay("f_pdf"); if (url) datos.pdf_url = url;
+    for (const d of lista) await asegurarCatalogos(d);
+    const url = await subirPdfSiHay("f_pdf"); if (url) lista.forEach(d => { d.pdf_url = url; });
     if (FORM_ORIG) {
-      const cambios = {};
+      const datos = lista[0], cambios = {};
       Object.keys(datos).forEach(k => {
-        const antes = k === "precio" ? FORM_ORIG.precio_num : k === "cantidad_min" ? FORM_ORIG.cantidad_min_num : k === "cantidad_max" ? FORM_ORIG.cantidad_max_num : tget(FORM_ORIG, k);
+        const antes = k === "precio" ? FORM_ORIG.precio_num : k === "cantidad_min" ? FORM_ORIG.cantidad_min_num : k === "cantidad_max" ? FORM_ORIG.cantidad_max_num : k === "tipo_transaccion" ? FORM_ORIG.tipo : tget(FORM_ORIG, k);
         if (String(antes ?? "") !== String(datos[k] ?? "")) cambios[k] = datos[k];
       });
       const r = await api("tarifa_editar", { id: FORM_ORIG.id, cambios }, true);
       st.textContent = r.cambios ? "Guardado (" + r.cambios + " cambio(s))." : "Sin cambios.";
-    } else {
-      await api("tarifa_crear", { tarifa: datos }, true);
+    } else if (lista.length === 1) {
+      await api("tarifa_crear", { tarifa: lista[0] }, true);
       st.textContent = "Tarifa guardada.";
+    } else {
+      const r = await api("tarifa_crear_lote", { tarifas: lista }, true);
+      st.textContent = r.ids.length + " tarifas guardadas.";
     }
     await loadTarifas();
     if (FORM_COLA && FORM_COLA.length) siguienteDeCola(); else setTimeout(() => cerrarModal("tarifaModal"), 500);
@@ -522,10 +622,12 @@ function parsearBloqueClaude(txt) {
   const lineas = Array.isArray(j) ? j : (j.tarifas || []);
   if (!lineas.length) throw new Error("El bloque no trae tarifas.");
   const comun = {};
-  ["proveedor_nombre", "proveedor", "cliente", "estado_cliente", "direccion", "comuna", "fecha", "fuente", "moneda", "detalle", "incluye_transporte", "incluye_disposicion"].forEach(k => { if (base[k] != null && base[k] !== "") comun[k === "proveedor" ? "proveedor_nombre" : k] = base[k]; });
+  ["proveedor_nombre", "proveedor", "cliente", "empresa", "sucursal", "tipo_transaccion", "estado_cliente", "direccion", "comuna", "fecha", "fuente", "moneda", "detalle", "incluye_transporte", "incluye_disposicion"].forEach(k => { if (base[k] != null && base[k] !== "") comun[k === "proveedor" ? "proveedor_nombre" : k] = base[k]; });
   return lineas.map(l => {
     const d = Object.assign({}, comun, l);
     if (d.proveedor && !d.proveedor_nombre) d.proveedor_nombre = d.proveedor; delete d.proveedor;
+    if (d.empresa && !d.cliente) d.cliente = d.empresa; delete d.empresa;
+    d.tipo_transaccion = String(d.tipo_transaccion || "cobra").toLowerCase() === "paga" ? "paga" : "cobra";
     if (base.detalle && l.detalle && l.detalle !== base.detalle) d.detalle = l.detalle + "\n" + base.detalle;
     const sup = SUPPLIERS.find(s => !s.sheetOnly && norm(s.name) === norm(d.proveedor_nombre))
       || SUPPLIERS.find(s => !s.sheetOnly && d.proveedor_nombre && norm(s.name).indexOf(norm(d.proveedor_nombre)) !== -1);
@@ -550,8 +652,8 @@ function interpretarPegado() {
     st.textContent = FORM_COLA.length + " línea(s) encontradas.";
     const sinProv = FORM_COLA.filter(d => !d.proveedor_id).length;
     prev.innerHTML = (sinProv ? '<p class="warn small">' + sinProv + ' línea(s) con un proveedor que no encontré en ClickUp: se guardarán solo con el nombre.</p>' : '') +
-      '<div class="tscroll"><table class="ttar"><tr><th>Proveedor</th><th>Cliente</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th></th></tr>' +
-      conAlerta.map(t => '<tr><td>' + esc(t.proveedor_nombre) + (t.proveedor_id ? '' : ' <span class="t-alerta">no está en ClickUp</span>') + '</td><td>' + esc(t.cliente || "-") + '</td><td>' + esc(t.residuo || "-") + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td><td>' + esc(t.comuna || t.direccion || "-") + '</td><td class="num">' + precioHtml(t) + '</td><td>' + alertaHtml(t) + '</td></tr>').join('') +
+      '<div class="tscroll"><table class="ttar"><tr><th>Proveedor</th><th>Empresa / sucursal</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th></th></tr>' +
+      conAlerta.map(t => '<tr><td>' + esc(t.proveedor_nombre) + (t.proveedor_id ? '' : ' <span class="t-alerta">no está en ClickUp</span>') + '</td><td>' + empresaHtml(t) + '</td><td>' + esc(t.residuo || "-") + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td><td>' + esc(t.comuna || t.direccion || "-") + '</td><td class="num">' + precioHtml(t) + '</td><td>' + alertaHtml(t) + '</td></tr>').join('') +
       '</table></div>' +
       campo("pegarPdf", "PDF de la cotización (se adjunta a todas)", '<input id="pegarPdf" type="file" accept="application/pdf">', "span2") +
       '<div class="tf-acc"><span id="pegarStatus2" class="muted small"></span>' +
@@ -608,11 +710,11 @@ function mostrarVista(v) {
 
 function tarifasInit() {
   renderAuthBox();
-  const dlc = document.getElementById("comunaDL");
-  if (dlc) dlc.innerHTML = COMUNAS_LISTA.map(c => '<option value="' + esc(c) + '">').join('');
-  ["tfResiduo", "tfRegion", "tfUnidad", "tfEstado"].forEach(id => document.getElementById(id).addEventListener("change", renderTarifas));
-  document.getElementById("tfTexto").addEventListener("input", renderTarifas);
-  ["tfAnteriores", "tfBajas", "tfAlertas"].forEach(id => document.getElementById(id).addEventListener("change", renderTarifas));
+  document.getElementById("tfResiduoBox").innerHTML = mselHtml("tfResiduo", { placeholder: "Todos (+ agregar)", onChange: renderTarifas });
+  document.getElementById("tfComunaBox").innerHTML = mselHtml("tfComuna", { placeholder: "Todas (+ agregar)", onChange: renderTarifas });
+  ["tfRegion", "tfUnidad", "tfEstado", "tfTipo", "tfAnteriores", "tfBajas", "tfAlertas"].forEach(id => document.getElementById(id).addEventListener("change", renderTarifas));
+  ["tfTexto", "tfSucursal"].forEach(id => document.getElementById(id).addEventListener("input", renderTarifas));
+  document.getElementById("tfEmpresa").addEventListener("input", e => { actualizarSucursalDL("tfSucursalDL", e.target.value); renderTarifas(); });
   if (lsGet("rp_vista") === "tar") mostrarVista("tar");
   loadUF();
 }
