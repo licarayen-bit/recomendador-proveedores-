@@ -163,18 +163,29 @@ window.addEventListener("message", ev => {
 
 /* ---------------- API (Apps Script) ---------------- */
 async function api(action, payload, conSesion) {
-  const body = Object.assign({ action }, payload || {});
+  const body = Object.assign({ action, reqId: nuevoReqId() }, payload || {});
   if (conSesion) {
     if (!sesionActiva()) await iniciarSesion();
     body.auth = AUTH.token;
   }
-  const resp = await fetch(APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) });
-  const data = await resp.json();
-  if (!data || !data.ok) {
-    if (data && data.auth) cerrarSesion();
-    throw new Error(((data && data.error) || "Error desconocido").replace(/^AUTH:\s*/, ""));
+  // Google a veces pierde la respuesta de Apps Script y devuelve una página HTML.
+  // Se reintenta con el mismo reqId: el backend devuelve la respuesta guardada sin repetir la acción.
+  let data = null;
+  for (let intento = 1; intento <= 3 && !data; intento++) {
+    const resp = await fetch(APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) });
+    const txt = await resp.text();
+    try { data = JSON.parse(txt); } catch (e) { if (intento < 3) await new Promise(r => setTimeout(r, 700 * intento)); }
+  }
+  if (!data) throw new Error("El servidor no respondió bien. Revisa si el cambio quedó guardado antes de reintentar.");
+  if (!data.ok) {
+    if (data.auth) cerrarSesion();
+    throw new Error((data.error || "Error desconocido").replace(/^AUTH:\s*/, ""));
   }
   return data.data || {};
+}
+
+function nuevoReqId() {
+  try { return crypto.randomUUID(); } catch (e) { return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12); }
 }
 
 /* ---------------- carga de datos ---------------- */
