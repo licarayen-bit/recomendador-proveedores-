@@ -56,11 +56,59 @@ function guardarSesion(token) {
   lsSet("rp_auth", AUTH);
   renderAuthBox();
   if (_loginResolve) { _loginResolve(AUTH); _loginResolve = null; }
+  if (_puertaResolve) { _puertaResolve(AUTH); _puertaResolve = null; }
+  ocultarPuerta();
   cerrarModal("loginModal");
   return AUTH;
 }
 
-function cerrarSesion() { AUTH = null; lsDel("rp_auth"); renderAuthBox(); }
+function cerrarSesion() { AUTH = null; lsDel("rp_auth"); renderAuthBox(); mostrarPuerta(); }
+
+/* ---------------- pantalla de acceso obligatoria ----------------
+   Tapa la web hasta iniciar sesión con @recylink.com. Ojo: mientras los Sheets
+   sean públicos esto no protege los datos, solo el uso de la web. */
+let _puertaResolve = null;
+
+/** Resuelve cuando hay sesión válida; si no la hay, muestra la pantalla de acceso. */
+function exigirSesion() {
+  if (sesionActiva()) return Promise.resolve(AUTH);
+  return new Promise(resolve => { _puertaResolve = resolve; mostrarPuerta(); });
+}
+
+function mostrarPuerta(msg) {
+  const p = document.getElementById("puerta"); if (!p) return;
+  p.innerHTML =
+    '<div class="puerta-card" role="dialog" aria-modal="true" aria-labelledby="puertaTit">' +
+      '<h2 id="puertaTit">Recomendador de Proveedores</h2>' +
+      '<p>Ingresa con tu cuenta <b>@recylink.com</b> para continuar.</p>' +
+      (msg ? '<p class="warn small">' + esc(msg) + '</p>' : '') +
+      '<button class="cbtn puerta-btn" onclick="abrirVentanaLogin()">Iniciar sesión con Google</button>' +
+      '<p id="puertaAyuda" class="small muted">Se abrirá una ventana de Google; al terminar se cierra sola.</p>' +
+      '<details class="small"><summary>¿La ventana no se cierra sola?</summary>' +
+        '<p>Copia el código que aparece en ella y pégalo aquí:</p>' +
+        '<textarea id="puertaPaste" rows="3"></textarea>' +
+        '<button class="cbtn" onclick="try{guardarSesion(document.getElementById(\'puertaPaste\').value)}catch(e){alert(e.message)}">Usar código</button>' +
+      '</details>' +
+    '</div>';
+  p.style.display = "flex";
+  document.body.classList.add("con-puerta");
+}
+
+function ocultarPuerta() {
+  const p = document.getElementById("puerta"); if (!p) return;
+  p.style.display = "none"; p.innerHTML = "";
+  document.body.classList.remove("con-puerta");
+}
+
+function abrirVentanaLogin() {
+  const url = LOGIN_URL + "?origin=" + encodeURIComponent(location.origin);
+  const w = window.open(url, "rp_login", "width=480,height=620");
+  const ayuda = document.getElementById("puertaAyuda");
+  if (!w && ayuda) ayuda.innerHTML = 'Tu navegador bloqueó la ventana. <a href="' + esc(url) + '" target="_blank" rel="noopener">Ábrela aquí</a>.';
+}
+
+// Si la sesión vence con la web abierta, se vuelve a pedir.
+setInterval(() => { if (AUTH && AUTH.exp <= Date.now()) { AUTH = null; lsDel("rp_auth"); renderAuthBox(); mostrarPuerta("Tu sesión expiró."); } }, 60000);
 
 /** Abre la ventana de Google y espera la credencial. */
 function iniciarSesion() {
