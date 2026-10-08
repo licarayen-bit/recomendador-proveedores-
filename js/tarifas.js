@@ -199,6 +199,29 @@ function filasAObjetos(rows) {
   return rows.slice(1).map(r => { const o = {}; head.forEach((h, i) => { if (h) o[h] = r[i] == null ? "" : r[i]; }); return o; });
 }
 
+/* Google entrega el Sheet con unos segundos de atraso: los cambios recién guardados se
+   aplican en pantalla con la fila que devuelve el servidor y se mantienen hasta que el
+   Sheet los muestre (máx. 10 min). Evita que parezca que "no pasó nada" y se guarde dos veces. */
+const PENDIENTES = {};
+function aplicarPendientes() {
+  const ahora = Date.now();
+  Object.keys(PENDIENTES).forEach(id => {
+    const p = PENDIENTES[id];
+    if (ahora - p.t > 600000) { delete PENDIENTES[id]; return; }
+    const i = TARIFAS.findIndex(t => t.id === id);
+    if (i !== -1 && tget(TARIFAS[i], "actualizado_el") >= tget(p.fila, "actualizado_el")) { delete PENDIENTES[id]; return; }
+    const t = prepararTarifa(Object.assign({}, p.fila));
+    if (i === -1) TARIFAS.push(t); else TARIFAS[i] = t;
+  });
+}
+/** Muestra de inmediato lo que devolvió el servidor y luego relee el Sheet. */
+async function refrescarTrasGuardar(filas) {
+  (filas || []).filter(f => f && f.id).forEach(f => { PENDIENTES[f.id] = { fila: f, t: Date.now() }; });
+  aplicarPendientes(); calcularAlertas(); poblarFiltrosTarifas(); renderTarifas();
+  if (typeof render === "function" && SUPPLIERS.length) { aplicarTarifasAProveedores(); render(); }
+  loadTarifas(); // en segundo plano
+}
+
 async function loadTarifas() {
   try {
     const [rows, cats] = await Promise.all([
@@ -206,6 +229,7 @@ async function loadTarifas() {
       gvizFetch(MIRROR_SHEET_ID, CATALOGOS_GID, true, true).catch(() => null)
     ]);
     TARIFAS = filasAObjetos(rows).filter(t => tget(t, "id")).map(prepararTarifa);
+    aplicarPendientes();
     if (cats && cats.length) {
       const head = cats[0];
       head.forEach((h, i) => {
@@ -732,14 +756,16 @@ async function guardarTarifa() {
       });
       const r = await api("tarifa_editar", { id: FORM_ORIG.id, cambios }, true);
       st.textContent = r.cambios ? "Guardado (" + r.cambios + " cambio(s))." : "Sin cambios.";
+      await refrescarTrasGuardar([r.tarifa]);
     } else if (lista.length === 1) {
-      await api("tarifa_crear", { tarifa: lista[0] }, true);
+      const r = await api("tarifa_crear", { tarifa: lista[0] }, true);
       st.textContent = "Tarifa guardada.";
+      await refrescarTrasGuardar([r.tarifa]);
     } else {
       const r = await api("tarifa_crear_lote", { tarifas: lista }, true);
       st.textContent = r.ids.length + " tarifas guardadas.";
+      await refrescarTrasGuardar(r.tarifas);
     }
-    await loadTarifas();
     if (FORM_COLA && FORM_COLA.length) siguienteDeCola(); else setTimeout(() => cerrarModal("tarifaModal"), 500);
   } catch (e) {
     st.textContent = "Error: " + e.message;
@@ -750,7 +776,7 @@ async function guardarTarifa() {
 async function cambiarActivo(id, activo) {
   const t = TARIFAS.find(x => x.id === id);
   if (!activo && !confirm("¿Dar de baja esta tarifa de " + (t ? t.proveedor_nombre : "") + "? Se puede restaurar después.")) return;
-  try { await api(activo ? "tarifa_restaurar" : "tarifa_baja", { id }, true); await loadTarifas(); }
+  try { const r = await api(activo ? "tarifa_restaurar" : "tarifa_baja", { id }, true); await refrescarTrasGuardar([r.tarifa]); }
   catch (e) { alert("No se pudo: " + e.message); }
 }
 
@@ -833,14 +859,15 @@ function interpretarPegado() {
       campo("pegarPdf", "PDF de la cotización (se adjunta a todas)", '<input id="pegarPdf" type="file" accept="application/pdf">', "span2") +
       '<div class="tf-acc"><span id="pegarStatus2" class="muted small"></span>' +
       '<button class="lnk" onclick="revisarUnaPorUna()">Revisar una por una</button>' +
-      '<button class="cbtn" onclick="guardarLoteClaude()">Guardar todas (' + FORM_COLA.length + ')</button></div>';
+      '<button class="cbtn" onclick="guardarLoteClaude(this)">Guardar todas (' + FORM_COLA.length + ')</button></div>';
   } catch (e) {
     FORM_COLA = null; prev.innerHTML = ""; st.textContent = "No se pudo interpretar: " + e.message;
   }
 }
 
-async function guardarLoteClaude() {
+async function guardarLoteClaude(btn) {
   const st = document.getElementById("pegarStatus2");
+  if (btn) { if (btn.disabled) return; btn.disabled = true; }
   try {
     if (!sesionActiva()) await iniciarSesion();
     st.textContent = "Guardando…";
@@ -849,9 +876,9 @@ async function guardarLoteClaude() {
     const r = await api("tarifa_crear_lote", { tarifas: FORM_COLA }, true);
     st.textContent = r.ids.length + " tarifa(s) guardadas.";
     FORM_COLA = null;
-    await loadTarifas();
+    await refrescarTrasGuardar(r.tarifas);
     setTimeout(() => cerrarModal("pegarModal"), 700);
-  } catch (e) { st.textContent = "Error: " + e.message; }
+  } catch (e) { st.textContent = "Error: " + e.message; if (btn) btn.disabled = false; }
 }
 
 async function revisarUnaPorUna() {
