@@ -257,8 +257,9 @@ function prepararTarifa(t) {
   t.cantidad_max_num = numDe(t.cantidad_max);
   t.moneda = (tget(t, "moneda") || "CLP").toUpperCase();
   t.activo = tget(t, "activo") !== "no";
-  t.incluye_transporte = siNo(t.incluye_transporte);
-  t.incluye_disposicion = siNo(t.incluye_disposicion);
+  // Regla (2026-10-08): si no se indica lo contrario, el servicio incluye transporte y disposición final.
+  t.incluye_transporte = siNo(t.incluye_transporte) || "si";
+  t.incluye_disposicion = siNo(t.incluye_disposicion) || "si";
   if (!t.region && t.comuna) t.region = regionDeComuna(t.comuna);
   t.provKey = tget(t, "proveedor_id") || "n:" + norm(t.proveedor_nombre);
   t.tipo = tget(t, "tipo_transaccion").toLowerCase() === "paga" ? "paga" : "cobra";
@@ -325,7 +326,6 @@ function calcularAlertas() {
     else if (t.precio_num <= 1) a.push("Precio de " + (t.moneda === "UF" ? t.precio_num + " UF" : fmtCLP(t.precio_num)) + ": posible valor de relleno");
     if (!tget(t, "unidad")) a.push("Falta la unidad");
     if (!tget(t, "direccion") && !tget(t, "comuna")) a.push("Falta la dirección o comuna");
-    if (!t.incluye_transporte || !t.incluye_disposicion) a.push("No se indicó si incluye transporte y/o disposición");
     const pares = (grupos[grupoKey(t)] || []).filter(x => x !== t).map(clpDe).filter(v => v != null);
     const v = clpDe(t);
     if (pares.length >= 2 && v != null && v > 1) {
@@ -708,7 +708,8 @@ function abrirFormTarifa(id, prefill, grupo) {
   if (t) { v.precio = t.precio_num == null ? "" : t.precio_num; v.cantidad_min = t.cantidad_min_num ?? ""; v.cantidad_max = t.cantidad_max_num ?? ""; v.tipo_transaccion = t.tipo; }
   const residuos = [].concat(v.residuos || v.residuo || []).filter(Boolean);
   const comunas = [].concat(v.comunas || v.comuna || []).filter(Boolean).map(comunaCanonica);
-  const sn = [["", "No se sabe"], ["si", "Sí"], ["no", "No"]];
+  const sn = [["si", "Sí"], ["no", "No"]]; // por defecto Sí, salvo que la cotización lo excluya
+  if (!t && !FORM_GRUPO) { v.incluye_transporte = siNo(v.incluye_transporte) || "si"; v.incluye_disposicion = siNo(v.incluye_disposicion) || "si"; }
   const sucursales = [].concat(v.sucursales || v.sucursal || []).filter(Boolean);
   const multi = !t; // al crear o editar un grupo se eligen varios residuos/sucursales (una tarifa por combinación)
   const enGrupo = !!FORM_GRUPO;
@@ -1091,8 +1092,8 @@ function parsearBloqueClaude(txt) {
     d.comuna = comunaCanonica(d.comuna); d.region = regionDeComuna(d.comuna);
     d.precio = numDe(d.precio); d.cantidad_min = numDe(d.cantidad_min); d.cantidad_max = numDe(d.cantidad_max);
     d.moneda = String(d.moneda || "CLP").toUpperCase();
-    d.incluye_transporte = siNo(d.incluye_transporte === true ? "si" : d.incluye_transporte === false ? "no" : d.incluye_transporte);
-    d.incluye_disposicion = siNo(d.incluye_disposicion === true ? "si" : d.incluye_disposicion === false ? "no" : d.incluye_disposicion);
+    d.incluye_transporte = siNo(d.incluye_transporte === true ? "si" : d.incluye_transporte === false ? "no" : d.incluye_transporte) || "si";
+    d.incluye_disposicion = siNo(d.incluye_disposicion === true ? "si" : d.incluye_disposicion === false ? "no" : d.incluye_disposicion) || "si";
     if (!d.fuente) d.fuente = "cotizacion";
     return d;
   });
