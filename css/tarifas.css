@@ -103,6 +103,8 @@ tr.abierta .t-flecha { transform:rotate(90deg); }
 .t-etq { display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:#667085; font-weight:600; margin-bottom:2px; }
 .t-acciones { margin:4px 0 8px; }
 .ttar.t-indiv { font-size:12px; }
+.ttar.t-suc { font-size:12px; min-width:480px; margin-bottom:8px; }
+.ttar.t-suc td, .ttar.t-suc th { padding:4px 8px; }
 
 /* confirmaciones en filas */
 .ok-msg { color:#047857; font-weight:700; font-size:12px; white-space:nowrap; }

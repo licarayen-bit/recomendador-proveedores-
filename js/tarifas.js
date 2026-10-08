@@ -500,13 +500,11 @@ function filaGrupoHtml(ts, opts) {
         dato("Transporte", esc(t0.incluye_transporte === "no" ? "No incluye" : "Incluye")) +
         dato("Disposición final", esc(t0.incluye_disposicion === "no" ? "No incluye" : "Incluye")) +
         dato("Estado del servicio", estadoServicioPill(t0) || '<span class="muted">-</span>') +
-        dato("Sucursales", lista(ts.map(t => t.sucursal), 8)) +
-        dato("Comuna / región", lista(ts.map(t => [t.comuna, t.region].filter(Boolean).join(", ")), 6)) +
-        dato("Dirección", lista(ts.map(t => t.direccion), 4)) +
         dato("PDF", pdfs.length ? pdfs.map((u, i) => '<a href="' + esc(u) + '" target="_blank" rel="noopener">PDF' + (pdfs.length > 1 ? ' ' + (i + 1) : '') + '</a>').join(' · ') : '<span class="muted">sin PDF</span>') +
         dato("Fuente", esc(t0.fuente || "-") + (t0.fecha ? ' · fecha de la tarifa ' + esc(t0.fecha) : '')) +
         (t0.detalle ? '<div class="t-dato span-all"><span class="t-etq">Detalle del cobro</span>' + esc(t0.detalle).replace(/\n/g, '<br>') + '</div>' : '') +
       '</div>' +
+      tablaSucursalesHtml(ts) +
       (alertas.length ? '<div class="warn small" style="margin:6px 0">⚠ ' + esc(alertas.join(" · ")) + '</div>' : '') +
       '<div class="t-acciones">' + (t0.activo && ts.length > 1 ? '<button class="cbtn mini" onclick="abrirFormGrupo(\'' + esc(t0.id) + '\')">Editar grupo (' + ts.length + ')</button>' : '') + '</div>' +
       '<div class="tscroll"><table class="ttar t-indiv"><tr><th>Empresa / sucursal</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
@@ -514,6 +512,22 @@ function filaGrupoHtml(ts, opts) {
       '</table></div>' +
     '</td></tr>';
   return principal + detalle;
+}
+/** Una fila por sucursal (o por lugar, si no hay sucursal): Sucursal · Región · Comuna · Dirección. */
+function tablaSucursalesHtml(ts) {
+  const vistos = {}, filas = [];
+  ts.forEach(t => {
+    const k = norm(t.sucursal) + "|" + norm(t.comuna) + "|" + norm(t.direccion);
+    if (vistos[k]) return; vistos[k] = 1;
+    filas.push({ sucursal: t.sucursal, region: t.region || regionDeComuna(t.comuna), comuna: t.comuna, direccion: t.direccion });
+  });
+  if (!filas.some(f => f.sucursal || f.comuna || f.direccion)) return '';
+  filas.sort((a, b) => String(a.region).localeCompare(String(b.region), "es") || String(a.comuna).localeCompare(String(b.comuna), "es") || String(a.sucursal).localeCompare(String(b.sucursal), "es"));
+  const c = v => v ? esc(v) : '<span class="muted">-</span>';
+  return '<div class="t-etq" style="margin-top:4px">Sucursales</div>' +
+    '<div class="tscroll"><table class="ttar t-suc"><tr><th>Sucursal</th><th>Región</th><th>Comuna</th><th>Dirección</th></tr>' +
+    filas.map(f => '<tr><td><b>' + c(f.sucursal) + '</b></td><td>' + c(f.region) + '</td><td>' + c(f.comuna) + '</td><td>' + c(f.direccion) + '</td></tr>').join('') +
+    '</table></div>';
 }
 function verDetalle(gid, tr) {
   const d = document.querySelector('tr[data-det="' + gid + '"]');
@@ -990,8 +1004,9 @@ function abrirSucursales() {
     '<h3 style="margin-top:16px;font-size:15px">+ Nueva sucursal</h3>' +
     '<div class="tf-grid">' +
       campo("s_n_suc", "Sucursal", '<input id="s_n_suc">') +
-      campo("s_n_com", "Comuna", '<input id="s_n_com" list="s_comDL">') +
-      campo("s_n_dir", "Dirección", '<input id="s_n_dir">', "span2") +
+      campo("s_n_reg", "Región", '<input id="s_n_reg" readonly tabindex="-1" placeholder="se completa con la comuna">') +
+      campo("s_n_com", "Comuna", '<input id="s_n_com" list="s_comDL" oninput="document.getElementById(\'s_n_reg\').value = regionDeComuna(this.value)">') +
+      campo("s_n_dir", "Dirección", '<input id="s_n_dir">') +
     '</div><datalist id="s_comDL">' + COMUNAS_LISTA.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
     '<div class="tf-acc"><button class="cbtn" data-txt="Agregar sucursal" onclick="guardarSucursal(null, this)">Agregar sucursal</button></div>');
   renderSucursales();
@@ -1008,10 +1023,11 @@ function renderSucursales() {
   TARIFAS.forEach(t => { if (t.activo && norm(t.cliente) === norm(emp) && t.sucursal && !conocidas[norm(t.sucursal)]) conocidas[norm(t.sucursal)] = { empresa: emp, sucursal: t.sucursal, direccion: t.direccion || "", comuna: t.comuna || "", soloTarifas: true }; });
   const filas = Object.values(conocidas).filter(x => !q || norm(x.sucursal).indexOf(q) !== -1).sort((a, b) => a.sucursal.localeCompare(b.sucursal, "es"));
   document.getElementById("s_lista").innerHTML = filas.length
-    ? '<div class="tscroll"><table class="ttar"><tr><th>Sucursal</th><th>Dirección</th><th>Comuna</th><th></th></tr>' + filas.map((x, i) =>
+    ? '<div class="tscroll"><table class="ttar"><tr><th>Sucursal</th><th>Región</th><th>Comuna</th><th>Dirección</th><th></th></tr>' + filas.map((x, i) =>
         '<tr><td><b>' + esc(x.sucursal) + '</b>' + (x.soloTarifas ? '<div class="muted small">no estaba en la lista</div>' : '') + '</td>' +
+        '<td id="s_reg_' + i + '" class="small">' + (esc(regionDeComuna(x.comuna) || x.region || "") || '<span class="muted">-</span>') + '</td>' +
+        '<td><input id="s_com_' + i + '" value="' + esc(x.comuna) + '" list="s_comDL" oninput="document.getElementById(\'s_reg_' + i + '\').textContent = regionDeComuna(this.value) || \'-\'"></td>' +
         '<td><input id="s_dir_' + i + '" value="' + esc(x.direccion) + '" data-suc="' + esc(x.sucursal) + '"></td>' +
-        '<td><input id="s_com_' + i + '" value="' + esc(x.comuna) + '" list="s_comDL"></td>' +
         '<td class="acc">' + (SUC_GUARDADA && SUC_GUARDADA.k === norm(emp) + "|" + norm(x.sucursal) && Date.now() - SUC_GUARDADA.t < 15000
           ? '<span class="ok-msg">✓ Guardado' + (SUC_GUARDADA.n ? ' · ' + SUC_GUARDADA.n + ' tarifa(s)' : '') + '</span>'
           : '<button class="cbtn mini" onclick="guardarSucursal(' + i + ', this)">Guardar</button>') + '</td></tr>').join('') + '</table></div>'
@@ -1039,7 +1055,7 @@ async function guardarSucursal(i, btn) {
     if (btn && i === null) { btn.disabled = false; btn.textContent = "Agregar sucursal"; }
     setTimeout(() => { if (document.getElementById("s_lista")) renderSucursales(); }, 15500);
     if (r.tarifas.length) await refrescarTrasGuardar(r.tarifas);
-    if (i === null) ["s_n_suc", "s_n_dir", "s_n_com"].forEach(id => { document.getElementById(id).value = ""; });
+    if (i === null) ["s_n_suc", "s_n_dir", "s_n_com", "s_n_reg"].forEach(id => { document.getElementById(id).value = ""; });
     renderSucursales();
   } catch (e) { fallo("Error: " + e.message); }
 }
