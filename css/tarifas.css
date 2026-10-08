@@ -83,6 +83,12 @@ body.con-puerta { overflow:hidden; }
 .msel-otro { display:flex; gap:6px; align-items:center; }
 .msel-otro input { flex:1; }
 
+/* filas agrupadas (mismas condiciones en varias sucursales/residuos) */
+.ttar tr.t-grupo td { background:#fbfcfe; }
+.ttar tr.t-grupo.best td { background:#f0fdf4; }
+.ttar tr.t-sub td { background:#fafafa; font-size:12px; }
+.ttar tr.t-sub td:first-child { border-left:3px solid #cfe0f5; padding-left:12px; }
+
 /* el proveedor paga al cliente */
 .t-paga { color:#047857; }
 .tgrupo.tg-paga { border-left:4px solid #10b981; }
