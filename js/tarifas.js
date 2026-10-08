@@ -168,13 +168,17 @@ async function api(action, payload, conSesion) {
     if (!sesionActiva()) await iniciarSesion();
     body.auth = AUTH.token;
   }
-  // Google a veces pierde la respuesta de Apps Script y devuelve una página HTML.
+  // Google a veces pierde la respuesta de Apps Script (devuelve HTML o el navegador corta por CORS).
   // Se reintenta con el mismo reqId: el backend devuelve la respuesta guardada sin repetir la acción.
   let data = null;
   for (let intento = 1; intento <= 3 && !data; intento++) {
-    const resp = await fetch(APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) });
-    const txt = await resp.text();
-    try { data = JSON.parse(txt); } catch (e) { if (intento < 3) await new Promise(r => setTimeout(r, 700 * intento)); }
+    try {
+      const resp = await fetch(APPS_SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(body) });
+      data = JSON.parse(await resp.text());
+    } catch (e) { // HTML en vez de JSON, o el navegador corta por CORS al rebotar
+      data = null;
+      if (intento < 3) await new Promise(r => setTimeout(r, 800 * intento));
+    }
   }
   if (!data) throw new Error("El servidor no respondió bien. Revisa si el cambio quedó guardado antes de reintentar.");
   if (!data.ok) {
