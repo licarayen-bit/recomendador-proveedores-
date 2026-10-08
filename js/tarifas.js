@@ -432,11 +432,12 @@ function filaTarifaHtml(t, opts) {
   return '<tr class="' + (t.activo ? "" : "t-baja ") + (t.vigente || !t.activo ? "" : "t-anterior ") + (opts.best ? "best" : "") + (opts.sub ? " t-sub" : "") + '"' + (opts.sub ? ' data-grp="' + opts.sub + '" style="display:none"' : '') + '>' +
     (opts.sinProveedor ? '' : '<td><b>' + esc(t.proveedor_nombre || "-") + '</b>' + (opts.best ? ' <span class="t-best">★ ' + (t.tipo === "paga" ? "paga más" : "menor") + '</span>' : '') + '</td>') +
     '<td>' + empresaHtml(t) + '</td>' +
-    (opts.conServicio ? '<td>' + esc(t.residuo || "-") + (t.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td>' : '') +
+    (opts.conServicio ? '<td>' + esc(t.residuo || "-") + (t.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div>' +
+      (t.detalle ? '<div class="t-detalle-txt">' + esc(t.detalle).replace(/\n/g, '<br>') + '</div>' : '') + '</td>' : '') +
     '<td>' + esc(lugar || "-") + (cant ? '<div class="muted small">cant. ' + esc(cant) + '</div>' : '') + '</td>' +
     '<td class="num">' + precioHtml(t) + '</td>' +
     '<td><span class="small">' + esc(t.fecha || "-") + '</span><div class="muted small">' + esc(t.fuente || "") + (t.pdf_url ? ' · <a href="' + esc(t.pdf_url) + '" target="_blank" rel="noopener">PDF</a>' : '') + '</div></td>' +
-    '<td>' + alertaHtml(t) + (t.detalle ? ' <span class="t-det" title="' + esc(t.detalle) + '">ℹ</span>' : '') + '</td>' +
+    '<td>' + alertaHtml(t) + '</td>' +
     '<td class="acc">' +
       '<button class="lnk" onclick="abrirFormTarifa(\'' + esc(t.id) + '\')">Editar</button>' +
       '<button class="lnk" onclick="verHistorial(\'' + esc(t.id) + '\')">Historial</button>' +
@@ -502,7 +503,7 @@ function filaGrupoHtml(ts, opts) {
         dato("Estado del servicio", estadoServicioPill(t0) || '<span class="muted">-</span>') +
         dato("PDF", pdfs.length ? pdfs.map((u, i) => '<a href="' + esc(u) + '" target="_blank" rel="noopener">PDF' + (pdfs.length > 1 ? ' ' + (i + 1) : '') + '</a>').join(' · ') : '<span class="muted">sin PDF</span>') +
         dato("Fuente", esc(t0.fuente || "-") + (t0.fecha ? ' · fecha de la tarifa ' + esc(t0.fecha) : '')) +
-        (t0.detalle ? '<div class="t-dato span-all"><span class="t-etq">Detalle del cobro</span>' + esc(t0.detalle).replace(/\n/g, '<br>') + '</div>' : '') +
+        detallesCobroHtml(ts) +
       '</div>' +
       tablaSucursalesHtml(ts) +
       (alertas.length ? '<div class="warn small" style="margin:6px 0">⚠ ' + esc(alertas.join(" · ")) + '</div>' : '') +
@@ -513,6 +514,23 @@ function filaGrupoHtml(ts, opts) {
     '</td></tr>';
   return principal + detalle;
 }
+/** Detalles del cobro distintos dentro del grupo; si hay más de uno, indica a qué sucursal/residuo aplica cada uno. */
+function detallesCobroHtml(ts) {
+  const porTexto = {}, orden = [];
+  ts.forEach(t => {
+    const txt = String(t.detalle || "").trim(); if (!txt) return;
+    if (!porTexto[txt]) { porTexto[txt] = []; orden.push(txt); }
+    porTexto[txt].push(t);
+  });
+  if (!orden.length) return '<div class="t-dato span-all"><span class="t-etq">Detalle del cobro</span><span class="muted">sin detalle</span></div>';
+  const varios = orden.length > 1;
+  return '<div class="t-dato span-all"><span class="t-etq">Detalle del cobro</span>' + orden.map(txt => {
+    const tt = porTexto[txt];
+    const aplica = varios ? [unicosOrdenados(tt.map(t => t.sucursal)).join(", "), unicosOrdenados(tt.map(t => t.residuo)).join(", ")].filter(Boolean).join(" · ") : "";
+    return '<div class="t-detalle-txt">' + (aplica ? '<b>' + esc(aplica) + ':</b> ' : '') + esc(txt).replace(/\n/g, '<br>') + '</div>';
+  }).join('') + '</div>';
+}
+
 /** Una fila por sucursal (o por lugar, si no hay sucursal): Sucursal · Región · Comuna · Dirección. */
 function tablaSucursalesHtml(ts) {
   const vistos = {}, filas = [];

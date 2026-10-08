@@ -103,6 +103,7 @@ tr.abierta .t-flecha { transform:rotate(90deg); }
 .t-etq { display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:#667085; font-weight:600; margin-bottom:2px; }
 .t-acciones { margin:4px 0 8px; }
 .ttar.t-indiv { font-size:12px; }
+.t-detalle-txt { font-size:12px; color:#344054; background:#fff; border-left:3px solid #cfe0f5; padding:4px 8px; margin-top:4px; border-radius:0 6px 6px 0; white-space:normal; }
 .ttar.t-suc { font-size:12px; min-width:480px; margin-bottom:8px; }
 .ttar.t-suc td, .ttar.t-suc th { padding:4px 8px; }
 
