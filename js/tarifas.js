@@ -468,37 +468,62 @@ function listaCorta(vals, max) {
   return esc(u.slice(0, max).join(", ")) + (u.length > max ? ' <span class="muted">+' + (u.length - max) + '</span>' : '');
 }
 let GRUPO_SEQ = 0;
-/** Fila resumen de un grupo; las filas individuales quedan ocultas debajo ("Ver"). */
+/**
+ * Fila compacta de un grupo de tarifas (mismas condiciones): Proveedor · Residuos · Costo · Empresa · Actualizado.
+ * Al hacer clic se despliega el detalle (contenedor, transporte/disposición, sucursales, lugar, dirección, PDF)
+ * y las tarifas individuales con sus acciones.
+ */
 function filaGrupoHtml(ts, opts) {
-  if (ts.length === 1) return filaTarifaHtml(ts[0], opts);
   opts = opts || {};
   const gid = "g" + (++GRUPO_SEQ);
-  const t0 = ts.slice().sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0];
+  const t0 = ts.slice().sort((a, b) => String(b.actualizado_el || b.fecha).localeCompare(String(a.actualizado_el || a.fecha)))[0];
   const alertas = [...new Set(ts.flatMap(t => t.alertas || []))];
   const pdfs = unicosOrdenados(ts.map(t => t.pdf_url));
-  const sucursales = ts.map(t => t.sucursal), residuos = ts.map(t => t.residuo);
-  const nSuc = unicosOrdenados(sucursales).length, nRes = unicosOrdenados(residuos).length;
-  const fila = '<tr class="t-grupo ' + (t0.activo ? "" : "t-baja ") + (t0.vigente || !t0.activo ? "" : "t-anterior ") + (opts.best ? "best" : "") + '">' +
-    (opts.sinProveedor ? '' : '<td><b>' + esc(t0.proveedor_nombre || "-") + '</b>' + (opts.best ? ' <span class="t-best">★ ' + (t0.tipo === "paga" ? "paga más" : "menor") + '</span>' : '') + '</td>') +
-    '<td>' + estadoServicioPill(t0) + (t0.estado_servicio ? ' ' : '') + (t0.cliente ? '<b>' + esc(t0.cliente) + '</b>' : '<span class="muted">sin empresa</span>') +
-      (nSuc ? '<div class="small">' + listaCorta(sucursales, 4) + '</div>' : '') + '</td>' +
-    (opts.conServicio ? '<td>' + listaCorta(residuos, 4) + (t0.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '<div class="muted small">' + [listaCorta(ts.map(t => t.contenedor), 3), esc(siNoTxt(t0.incluye_transporte, "transp.")), esc(siNoTxt(t0.incluye_disposicion, "disp."))].filter(Boolean).join(" · ") + '</div></td>' : '') +
-    '<td>' + (listaCorta(ts.map(t => t.comuna), 3) || "-") + '</td>' +
-    '<td class="num">' + precioHtml(t0) + '</td>' +
-    '<td><span class="small">' + esc(t0.fecha || "-") + '</span><div class="muted small">' + esc(t0.fuente || "") + (pdfs.length === 1 ? ' · <a href="' + esc(pdfs[0]) + '" target="_blank" rel="noopener">PDF</a>' : pdfs.length ? ' · ' + pdfs.length + ' PDF' : '') + '</div></td>' +
-    '<td>' + (alertas.length ? '<span class="t-alerta" title="' + esc(alertas.join("\n")) + '">⚠ ' + alertas.length + '</span>' : '') + '</td>' +
-    '<td class="acc">' +
-      (t0.activo ? '<button class="lnk" onclick="abrirFormGrupo(\'' + esc(t0.id) + '\')">Editar grupo</button>' : '') +
-      '<button class="lnk" onclick="verGrupo(\'' + gid + '\', this)">Ver ' + ts.length + '</button>' +
-      '<div class="muted small">' + ts.length + ' tarifas' + (nSuc > 1 ? ' · ' + nSuc + ' sucursales' : '') + (nRes > 1 ? ' · ' + nRes + ' residuos' : '') + '</div>' +
+  const actualizado = String(t0.actualizado_el || t0.fecha || "").slice(0, 10);
+  const columnas = opts.sinProveedor ? 4 : 5;
+  const principal =
+    '<tr class="t-fila ' + (t0.activo ? "" : "t-baja ") + (t0.vigente || !t0.activo ? "" : "t-anterior ") + '" onclick="verDetalle(\'' + gid + '\', this)">' +
+      (opts.sinProveedor ? '' : '<td><span class="t-flecha">▸</span> <b>' + esc(t0.proveedor_nombre || "-") + '</b>' +
+        (alertas.length ? ' <span class="t-alerta" title="' + esc(alertas.join("\n")) + '">⚠ ' + alertas.length + '</span>' : '') + '</td>') +
+      '<td>' + (opts.sinProveedor ? '<span class="t-flecha">▸</span> ' : '') + listaCorta(ts.map(t => t.residuo), 4) +
+        (t0.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '</td>' +
+      '<td class="num">' + precioHtml(t0) + '</td>' +
+      '<td>' + (t0.cliente ? esc(t0.cliente) : (esGeneral(t0) ? '<span class="muted">Valor general</span>' : '<span class="muted">-</span>')) + '</td>' +
+      '<td class="small">' + esc(actualizado) + '</td>' +
+    '</tr>';
+  const lista = (vals, max) => listaCorta(vals, max) || '<span class="muted">-</span>';
+  const dato = (etq, html) => '<div class="t-dato"><span class="t-etq">' + etq + '</span>' + html + '</div>';
+  const detalle =
+    '<tr class="t-detalle" data-det="' + gid + '" style="display:none"><td colspan="' + columnas + '">' +
+      '<div class="t-datos">' +
+        dato("Contenedor / vehículo", lista(ts.map(t => t.contenedor), 6)) +
+        dato("Transporte", esc(t0.incluye_transporte === "no" ? "No incluye" : "Incluye")) +
+        dato("Disposición final", esc(t0.incluye_disposicion === "no" ? "No incluye" : "Incluye")) +
+        dato("Estado del servicio", estadoServicioPill(t0) || '<span class="muted">-</span>') +
+        dato("Sucursales", lista(ts.map(t => t.sucursal), 8)) +
+        dato("Comuna / región", lista(ts.map(t => [t.comuna, t.region].filter(Boolean).join(", ")), 6)) +
+        dato("Dirección", lista(ts.map(t => t.direccion), 4)) +
+        dato("PDF", pdfs.length ? pdfs.map((u, i) => '<a href="' + esc(u) + '" target="_blank" rel="noopener">PDF' + (pdfs.length > 1 ? ' ' + (i + 1) : '') + '</a>').join(' · ') : '<span class="muted">sin PDF</span>') +
+        dato("Fuente", esc(t0.fuente || "-") + (t0.fecha ? ' · fecha de la tarifa ' + esc(t0.fecha) : '')) +
+        (t0.detalle ? '<div class="t-dato span-all"><span class="t-etq">Detalle del cobro</span>' + esc(t0.detalle).replace(/\n/g, '<br>') + '</div>' : '') +
+      '</div>' +
+      (alertas.length ? '<div class="warn small" style="margin:6px 0">⚠ ' + esc(alertas.join(" · ")) + '</div>' : '') +
+      '<div class="t-acciones">' + (t0.activo && ts.length > 1 ? '<button class="cbtn mini" onclick="abrirFormGrupo(\'' + esc(t0.id) + '\')">Editar grupo (' + ts.length + ')</button>' : '') + '</div>' +
+      '<div class="tscroll"><table class="ttar t-indiv"><tr><th>Empresa / sucursal</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
+        ts.map(t => filaTarifaHtml(t, { sinProveedor: true, conServicio: true })).join('') +
+      '</table></div>' +
     '</td></tr>';
-  return fila + ts.map(t => filaTarifaHtml(t, Object.assign({}, opts, { best: false, sub: gid }))).join('');
+  return principal + detalle;
 }
-function verGrupo(gid, btn) {
-  const filas = document.querySelectorAll('tr[data-grp="' + gid + '"]');
-  const abrir = filas.length && filas[0].style.display === "none";
-  filas.forEach(f => { f.style.display = abrir ? "" : "none"; });
-  btn.textContent = (abrir ? "Ocultar " : "Ver ") + filas.length;
+function verDetalle(gid, tr) {
+  const d = document.querySelector('tr[data-det="' + gid + '"]');
+  if (!d) return;
+  const abrir = d.style.display === "none";
+  d.style.display = abrir ? "" : "none";
+  tr.classList.toggle("abierta", abrir);
+}
+function encabezadoCompacto(sinProveedor) {
+  return '<tr>' + (sinProveedor ? '' : '<th>Proveedor</th>') + '<th>Residuos</th><th class="num">Costo</th><th>Empresa</th><th>Actualizado</th></tr>';
 }
 
 /** Valores únicos sin distinguir mayúsculas/tildes; gana la forma más usada ("Euro Constructora" sobre "Euro constructora"). */
@@ -572,28 +597,12 @@ function renderTarifas() {
   document.getElementById("tarCount").textContent = lista.length + " tarifa(s) · " + TARIFAS_STATUS;
   if (!lista.length) { box.innerHTML = '<div class="empty">' + (TARIFAS.length ? "Sin tarifas para el filtro actual." : "Aún no hay tarifas cargadas. Usa “+ Nueva tarifa” o “Pegar desde Claude”.") + '</div>'; return; }
 
-  const grupos = {};
-  lista.forEach(t => { (grupos[grupoKey(t)] = grupos[grupoKey(t)] || []).push(t); });
-  const claves = Object.keys(grupos).sort((a, b) => {
-    const ta = grupos[a][0], tb = grupos[b][0];
-    return (ta.tipo || "").localeCompare(tb.tipo || "") || (ta.residuo || "").localeCompare(tb.residuo || "", "es") || (ta.unidad || "").localeCompare(tb.unidad || "", "es");
-  });
-
-  box.innerHTML = claves.map(k => {
-    const ts = grupos[k];
-    const t0 = ts[0];
-    const paga = t0.tipo === "paga";
-    const vals = ts.filter(t => t.vigente && t.activo).map(clpDe).filter(v => v != null && v > 1);
-    // "Mejor": el más barato si el proveedor cobra; el que más paga si el proveedor paga.
-    const mejor = vals.length ? (paga ? Math.max(...vals) : Math.min(...vals)) : null;
-    ts.sort((a, b) => (b.vigente - a.vigente) || (paga ? (clpDe(b) ?? -1) - (clpDe(a) ?? -1) : (clpDe(a) ?? 1e15) - (clpDe(b) ?? 1e15)) || String(b.fecha).localeCompare(String(a.fecha)));
-    const titulo = [paga ? "PAGA" : "", t0.residuo || "(sin residuo)", t0.unidad ? "por " + t0.unidad : "(sin unidad)", t0.contenedor, siNoTxt(t0.incluye_transporte, "transporte"), siNoTxt(t0.incluye_disposicion, "disposición"), t0.region || "(sin región)"].filter(Boolean).join(" · ");
-    const stats = vals.length ? '<span class="stat">mín ' + fmtCLP(Math.min(...vals)) + '</span><span class="stat">mediana ' + fmtCLP(mediana(vals)) + '</span><span class="stat">máx ' + fmtCLP(Math.max(...vals)) + '</span><span class="stat muted">' + vals.length + ' vigente(s)</span>' : '';
-    return '<div class="tgrupo' + (paga ? " tg-paga" : "") + '"><div class="tg-head"><div class="tg-tit">' + esc(titulo) + '</div><div class="tg-stats">' + stats + '</div></div>' +
-      '<div class="tscroll"><table class="ttar"><tr><th>Proveedor</th><th>Empresa / sucursal</th><th>Lugar</th><th>' + (paga ? "Paga al cliente" : "Precio") + '</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
-      agruparPorCondiciones(ts).map(gr => filaGrupoHtml(gr, { best: vals.length > 1 && gr[0].vigente && gr[0].activo && clpDe(gr[0]) === mejor })).join('') +
-      '</table></div></div>';
-  }).join('');
+  const grupos = agruparPorCondiciones(lista).sort((a, b) =>
+    String(a[0].proveedor_nombre).localeCompare(String(b[0].proveedor_nombre), "es") ||
+    String(a[0].cliente).localeCompare(String(b[0].cliente), "es") ||
+    (b[0].vigente - a[0].vigente));
+  box.innerHTML = '<div class="tgrupo"><div class="tscroll"><table class="ttar t-compacta">' + encabezadoCompacto(false) +
+    grupos.map(gr => filaGrupoHtml(gr)).join('') + '</table></div></div>';
 }
 
 /* ---------------- integración con la lista de proveedores ----------------
@@ -658,8 +667,8 @@ function tarifasDetalleProveedor(s) {
   const head = '<div class="meta" style="margin-top:10px;"><b>Tarifas</b> <button class="lnk" onclick="abrirFormTarifa(null,{proveedor_nombre:' + esc(JSON.stringify(s.name)) + '})">+ Agregar tarifa</button></div>';
   if (!ts.length) return head + '<span class="toggle-hint">Sin tarifas registradas.</span>';
   ts.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
-  return head + '<div class="tscroll"><table class="ttar"><tr><th>Empresa / sucursal</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th>Fecha / fuente</th><th></th><th></th></tr>' +
-    agruparPorCondiciones(ts).map(gr => filaGrupoHtml(gr, { sinProveedor: true, conServicio: true })).join('') + '</table></div>';
+  return head + '<div class="tscroll"><table class="ttar t-compacta">' + encabezadoCompacto(true) +
+    agruparPorCondiciones(ts).map(gr => filaGrupoHtml(gr, { sinProveedor: true })).join('') + '</table></div>';
 }
 
 /* ---------------- modales ---------------- */
