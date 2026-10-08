@@ -32,6 +32,33 @@ function numDe(v) {
 }
 const siNo = v => { const s = String(v || "").toLowerCase(); return s === "si" || s === "sí" ? "si" : s === "no" ? "no" : ""; };
 
+/* ---------------- nombres de proveedores y empresas ---------------- */
+/** Clave para comparar nombres sin razón social: "Vuelta Verde Ltda." = "VUELTA VERDE" = "Vuelta Verde SpA". */
+function claveNombre(s) {
+  return norm(String(s || "").replace(/\b(s\.?\s?p\.?\s?a\.?|ltda\.?|limitada|s\.?\s?a\.?|e\.?i\.?r\.?l\.?|y\s+c[ií]a\.?)\s*$/i, ""));
+}
+/** Busca el proveedor en ClickUp: nombre exacto sin razón social, o un parecido parcial fuerte. */
+function buscarProveedorClickUp(nombre) {
+  const k = claveNombre(nombre); if (!k) return null;
+  const candidatos = SUPPLIERS.filter(s => !s.sheetOnly);
+  return candidatos.find(s => claveNombre(s.name) === k)
+    || candidatos.find(s => {
+      // Parecido parcial solo si es fuerte: el corto es al menos la mitad del largo,
+      // o el largo empieza con el corto ("ECOPORTUARIA..." / "ECOPORT"). Evita "RECIC" en "RECICLAJES...".
+      const c = claveNombre(s.name);
+      const [corto, largo] = c.length < k.length ? [c, k] : [k, c];
+      if (corto.length < 6 || largo.indexOf(corto) === -1) return false;
+      return corto.length / largo.length >= 0.5 || largo.indexOf(corto) === 0;
+    })
+    || null;
+}
+/** Usa el nombre de empresa ya registrado si es la misma ("Euro Constructora SpA" -> "Euro Constructora"). */
+function empresaCanonica(nombre) {
+  const k = claveNombre(nombre); if (!k) return String(nombre || "").trim();
+  const existentes = unicosOrdenados(TARIFAS.map(t => t.cliente));
+  return existentes.find(e => claveNombre(e) === k) || String(nombre).trim();
+}
+
 /* ---------------- sesión ---------------- */
 let AUTH = lsGet("rp_auth");
 if (AUTH && (!AUTH.exp || AUTH.exp < Date.now())) { AUTH = null; lsDel("rp_auth"); }
@@ -624,7 +651,7 @@ function autoRegion() {
 function leerFormulario() {
   const g = id => (document.getElementById(id).value || "").trim();
   const nombre = g("f_proveedor");
-  const sup = SUPPLIERS.find(s => !s.sheetOnly && norm(s.name) === norm(nombre));
+  const sup = buscarProveedorClickUp(nombre);
   const base = {
     proveedor_id: sup ? sup.id : "", proveedor_nombre: sup ? sup.name : nombre,
     tipo_transaccion: g("f_tipo"), estado_servicio: selOtroVal("f_estado_servicio"),
@@ -749,15 +776,22 @@ function parsearBloqueClaude(txt) {
   if (!lineas.length) throw new Error("El bloque no trae tarifas.");
   const comun = {};
   ["proveedor_nombre", "proveedor", "cliente", "empresa", "sucursal", "tipo_transaccion", "estado_servicio", "estado_cliente", "direccion", "comuna", "fecha", "fuente", "moneda", "detalle", "incluye_transporte", "incluye_disposicion"].forEach(k => { if (base[k] != null && base[k] !== "") comun[k === "proveedor" ? "proveedor_nombre" : k] = base[k]; });
-  return lineas.map(l => {
+  // Una línea puede traer listas en "residuo" y "comuna": una tarifa por combinación.
+  const expandidas = [];
+  lineas.forEach(l => {
+    const res = [].concat(l.residuo == null ? "" : l.residuo);
+    const com = [].concat(l.comuna == null || l.comuna === "" ? (comun.comuna || "") : l.comuna);
+    res.forEach(r => com.forEach(c => expandidas.push(Object.assign({}, l, { residuo: r, comuna: c }))));
+  });
+  return expandidas.map(l => {
     const d = Object.assign({}, comun, l);
     if (d.proveedor && !d.proveedor_nombre) d.proveedor_nombre = d.proveedor; delete d.proveedor;
     if (d.empresa && !d.cliente) d.cliente = d.empresa; delete d.empresa;
+    if (d.cliente) d.cliente = empresaCanonica(d.cliente);
     d.tipo_transaccion = String(d.tipo_transaccion || "cobra").toLowerCase() === "paga" ? "paga" : "cobra";
     if (base.detalle && l.detalle && l.detalle !== base.detalle) d.detalle = l.detalle + "\n" + base.detalle;
-    const sup = SUPPLIERS.find(s => !s.sheetOnly && norm(s.name) === norm(d.proveedor_nombre))
-      || SUPPLIERS.find(s => !s.sheetOnly && d.proveedor_nombre && norm(s.name).indexOf(norm(d.proveedor_nombre)) !== -1);
-    if (sup) { d.proveedor_id = sup.id; d.proveedor_nombre = sup.name; }
+    const sup = buscarProveedorClickUp(d.proveedor_nombre);
+    if (sup) { d._nombre_doc = d.proveedor_nombre; d.proveedor_id = sup.id; d.proveedor_nombre = sup.name; }
     if (!d.comuna && d.direccion) d.comuna = detectarComuna(d.direccion);
     d.comuna = comunaCanonica(d.comuna); d.region = regionDeComuna(d.comuna);
     d.precio = numDe(d.precio); d.cantidad_min = numDe(d.cantidad_min); d.cantidad_max = numDe(d.cantidad_max);
@@ -779,7 +813,7 @@ function interpretarPegado() {
     const sinProv = FORM_COLA.filter(d => !d.proveedor_id).length;
     prev.innerHTML = (sinProv ? '<p class="warn small">' + sinProv + ' línea(s) con un proveedor que no encontré en ClickUp: se guardarán solo con el nombre.</p>' : '') +
       '<div class="tscroll"><table class="ttar"><tr><th>Proveedor</th><th>Empresa / sucursal</th><th>Servicio</th><th>Lugar</th><th>Precio</th><th></th></tr>' +
-      conAlerta.map(t => '<tr><td>' + esc(t.proveedor_nombre) + (t.proveedor_id ? '' : ' <span class="t-alerta">no está en ClickUp</span>') + '</td><td>' + empresaHtml(t) + '</td><td>' + esc(t.residuo || "-") + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td><td>' + esc(t.comuna || t.direccion || "-") + '</td><td class="num">' + precioHtml(t) + '</td><td>' + alertaHtml(t) + '</td></tr>').join('') +
+      conAlerta.map(t => '<tr><td>' + esc(t.proveedor_nombre) + (t.proveedor_id ? (t._nombre_doc && claveNombre(t._nombre_doc) !== claveNombre(t.proveedor_nombre) ? '<div class="muted small">en la cotización: ' + esc(t._nombre_doc) + '</div>' : '') : ' <span class="t-alerta">no está en ClickUp</span>') + '</td><td>' + empresaHtml(t) + '</td><td>' + esc(t.residuo || "-") + '<div class="muted small">' + esc([t.contenedor, siNoTxt(t.incluye_transporte, "transp."), siNoTxt(t.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td><td>' + esc(t.comuna || t.direccion || "-") + '</td><td class="num">' + precioHtml(t) + '</td><td>' + alertaHtml(t) + '</td></tr>').join('') +
       '</table></div>' +
       campo("pegarPdf", "PDF de la cotización (se adjunta a todas)", '<input id="pegarPdf" type="file" accept="application/pdf">', "span2") +
       '<div class="tf-acc"><span id="pegarStatus2" class="muted small"></span>' +

@@ -49,6 +49,8 @@ function detectarComuna(direccion) {
   Object.keys(COMUNAS_IDX).forEach(k => {
     const pos = t.lastIndexOf(" " + k + " ");
     if (pos === -1) return;
+    // "Av. Pedro Aguirre Cerda 12968": nombre de calle, no comuna
+    if (/(^| )(av|avda|avenida|calle|pasaje|psje|camino|ruta|autopista|costanera)\s*$/.test(t.slice(0, pos))) return;
     const fin = pos + k.length;
     if (!mejor || fin > mejor.fin || (fin === mejor.fin && k.length > mejor.k.length)) mejor = { k, fin };
   });
