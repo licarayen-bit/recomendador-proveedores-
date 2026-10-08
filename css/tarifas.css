@@ -76,6 +76,11 @@
 /* el proveedor paga al cliente */
 .t-paga { color:#047857; }
 .tgrupo.tg-paga { border-left:4px solid #10b981; }
+.pill.es-activo { background:#dcfce7; color:#166534; }
+.pill.es-cotizado { background:#dbeafe; color:#1e40af; }
+.pill.es-notomado { background:#fee2e2; color:#991b1b; }
+.pill.es-terminado { background:#e5e7eb; color:#374151; }
+.pill.es-valorgeneral { background:#ede9fe; color:#5b21b6; }
 .pill.p-paga { background:#d1fae5; color:#047857; }
 
 @media (max-width:680px) {
