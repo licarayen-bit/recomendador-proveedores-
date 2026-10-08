@@ -8,6 +8,7 @@
 const TARIFAS_GID   = "1128661910";
 const HISTORIAL_GID = "538405505";
 const CATALOGOS_GID = "1478551931";
+const SUCURSALES_GID = "1371080297";
 const LOGIN_URL = "https://script.google.com/a/macros/recylink.com/s/AKfycbxIZsEsEJCFUgNEtvlUaAGKVWiB-lgGm8Q4G-1hMDARDJte2n0-QzzgqSgWvh5aAbsg/exec";
 const UF_API = "https://mindicador.cl/api/uf";
 
@@ -15,6 +16,7 @@ let TARIFAS = [];           // todas (activas y dadas de baja)
 let TARIFAS_STATUS = "no cargadas";
 let CATS = { residuo: [], unidad: [], contenedor: [], estado_cliente: ["activo", "inactivo", "prospecto"], estado_servicio: ["Activo", "Cotizado", "No tomado", "Terminado", "Valor general"], fuente: ["cotizacion", "plataforma", "informal", "carga inicial"], moneda: ["CLP", "UF"] };
 let UF = { valor: null, fecha: "", origen: "" };
+let SUCURSALES = []; // lista maestra: { empresa, sucursal, direccion, comuna, region }
 
 /* ---------------- utilidades ---------------- */
 const tget = (o, k) => (o && o[k] != null ? String(o[k]) : "");
@@ -226,7 +228,8 @@ async function loadTarifas() {
   try {
     const [rows, cats] = await Promise.all([
       gvizFetch(MIRROR_SHEET_ID, TARIFAS_GID, true, true),
-      gvizFetch(MIRROR_SHEET_ID, CATALOGOS_GID, true, true).catch(() => null)
+      gvizFetch(MIRROR_SHEET_ID, CATALOGOS_GID, true, true).catch(() => null),
+      gvizFetch(MIRROR_SHEET_ID, SUCURSALES_GID, true, true).then(filasAObjetos).then(l => { SUCURSALES = l.filter(x => x.empresa && x.sucursal); }).catch(() => null)
     ]);
     TARIFAS = filasAObjetos(rows).filter(t => tget(t, "id")).map(prepararTarifa);
     aplicarPendientes();
@@ -509,7 +512,17 @@ function unicosOrdenados(vals) {
 
 function sucursalesDe(empresa) {
   const ne = norm(empresa);
-  return unicosOrdenados(TARIFAS.filter(t => !ne || norm(t.cliente) === ne).map(t => t.sucursal));
+  return unicosOrdenados(SUCURSALES.filter(x => !ne || norm(x.empresa) === ne).map(x => x.sucursal)
+    .concat(TARIFAS.filter(t => !ne || norm(t.cliente) === ne).map(t => t.sucursal)));
+}
+
+/** Dirección conocida de una sucursal: primero la lista maestra, si no, alguna tarifa que la tenga. */
+function sucursalInfo(empresa, sucursal) {
+  const k = norm(empresa) + "|" + norm(sucursal);
+  const m = SUCURSALES.find(x => norm(x.empresa) + "|" + norm(x.sucursal) === k);
+  if (m) return { enLista: true, direccion: m.direccion || "", comuna: m.comuna || "", region: m.region || regionDeComuna(m.comuna) };
+  const t = TARIFAS.find(x => norm(x.cliente) + "|" + norm(x.sucursal) === k && (x.direccion || x.comuna));
+  return t ? { enLista: false, direccion: t.direccion || "", comuna: t.comuna || "", region: t.region || regionDeComuna(t.comuna) } : null;
 }
 
 function poblarFiltrosTarifas() {
@@ -709,7 +722,7 @@ function abrirFormTarifa(id, prefill, grupo) {
       campo("f_estado_servicio", "Estado del servicio", selOtroHtml("f_estado_servicio", CATS.estado_servicio, v.estado_servicio, "-", "ajustarPorEstadoServicio")) +
       campo("f_estado_cliente", "Estado del cliente", selOtroHtml("f_estado_cliente", CATS.estado_cliente, v.estado_cliente, "-"), "dep-cliente") +
       campo("f_cliente", "Empresa", inp("f_cliente", v.cliente, 'list="clienteDL" autocomplete="off" placeholder="Ej: COPEC" oninput="mselOpciones(\'f_sucursales\', sucursalesDe(this.value))"'), "dep-cliente") +
-      campo("f_sucursales", multi ? "Sucursal(es) <span class=\"muted\">· varias = una tarifa por cada una</span>" : "Sucursal", mselHtml("f_sucursales", { opciones: sucursalesDe(v.cliente), valores: sucursales, otro: true, unico: !multi, placeholder: "+ elegir sucursal" }), "dep-cliente") +
+      campo("f_sucursales", multi ? "Sucursal(es) <span class=\"muted\">· varias = una tarifa por cada una</span>" : "Sucursal", mselHtml("f_sucursales", { opciones: sucursalesDe(v.cliente), valores: sucursales, otro: true, unico: !multi, placeholder: "+ elegir sucursal", onChange: alCambiarSucursales }) + '<div id="f_suc_info" class="small muted"></div>', "dep-cliente span2") +
       campo("f_residuos", multi ? "Residuo(s) * <span class=\"muted\">· varios = una tarifa por cada uno</span>" : "Residuo *", mselHtml("f_residuos", { opciones: CATS.residuo || [], valores: residuos, otro: true, unico: !multi, placeholder: "+ elegir residuo" }), "span2") +
       campo("f_contenedor", "Contenedor / vehículo", selOtroHtml("f_contenedor", CATS.contenedor, v.contenedor, "-")) +
       campo("f_unidad", "Unidad de cobro", selOtroHtml("f_unidad", CATS.unidad, v.unidad, "-")) +
@@ -733,6 +746,28 @@ function abrirFormTarifa(id, prefill, grupo) {
     () => { FORM_ORIG = null; FORM_COLA = null; FORM_GRUPO = null; });
   autoRegion();
   ajustarPorEstadoServicio();
+  alCambiarSucursales(true);
+}
+
+/** Muestra la dirección conocida de cada sucursal elegida y, si es una sola, llena dirección y comuna. */
+function alCambiarSucursales(inicial) {
+  const info = document.getElementById("f_suc_info"); if (!info) return;
+  const empresa = ((document.getElementById("f_cliente") || {}).value || "").trim();
+  const sucs = mselValores("f_sucursales");
+  if (!sucs.length) { info.innerHTML = ""; return; }
+  const lineas = sucs.map(su => {
+    const d = sucursalInfo(empresa, su);
+    return '<div>📍 <b>' + esc(su) + ':</b> ' + (d && (d.direccion || d.comuna) ? esc([d.direccion, d.comuna].filter(Boolean).join(", ")) : '<span class="warn">sin dirección registrada: se usará la que ingreses abajo y quedará guardada</span>') + '</div>';
+  });
+  info.innerHTML = lineas.join("") + (sucs.length > 1 ? '<div>Cada tarifa toma la dirección de su sucursal.</div>' : '');
+  if (sucs.length === 1 && !inicial) {
+    const d = sucursalInfo(empresa, sucs[0]);
+    const dir = document.getElementById("f_direccion");
+    if (d && dir) {
+      dir.value = d.direccion || "";
+      if (MSEL.f_comunas) { MSEL.f_comunas.valores = d.comuna ? [comunaCanonica(d.comuna)] : []; mselRender("f_comunas"); autoRegion(); }
+    }
+  }
 }
 
 /** "Valor general" es un precio de lista sin cliente: se ocultan empresa, sucursal y estado del cliente. */
@@ -784,11 +819,24 @@ function leerFormulario() {
   const residuos = mselValores("f_residuos");
   if (!residuos.length) throw new Error("Elige al menos un residuo.");
   const comunas = mselValores("f_comunas");
-  const lista = [];
-  residuos.forEach(r => (sucursales.length ? sucursales : [""]).forEach(su => (comunas.length ? comunas : [""]).forEach(c => {
-    lista.push(Object.assign({}, base, { residuo: r, sucursal: su, comuna: c, region: regionDeComuna(c) }));
-  })));
-  return { lista, enClickUp: !!sup, residuos, sucursales };
+  const lista = [], nuevasSucursales = [];
+  if (sucursales.length) {
+    // Una tarifa por residuo × sucursal; la dirección sale de la sucursal (o del formulario si no la tiene).
+    const comunaForm = comunas[0] || "";
+    sucursales.forEach(su => {
+      const d = sucursalInfo(base.cliente, su);
+      const conocida = !FORM_ORIG && d && (d.direccion || d.comuna); // al editar una tarifa manda lo que se escribe
+      const lugar = conocida ? { direccion: d.direccion, comuna: d.comuna, region: d.region }
+                             : { direccion: base.direccion, comuna: comunaForm, region: regionDeComuna(comunaForm) };
+      if (!d || !d.enLista) nuevasSucursales.push(Object.assign({ empresa: base.cliente, sucursal: su }, lugar));
+      residuos.forEach(r => lista.push(Object.assign({}, base, lugar, { residuo: r, sucursal: su })));
+    });
+  } else {
+    residuos.forEach(r => (comunas.length ? comunas : [""]).forEach(c => {
+      lista.push(Object.assign({}, base, { residuo: r, sucursal: "", comuna: c, region: regionDeComuna(c) }));
+    }));
+  }
+  return { lista, enClickUp: !!sup, residuos, sucursales, nuevasSucursales };
 }
 
 async function asegurarCatalogos(datos) {
@@ -815,7 +863,11 @@ async function subirPdfSiHay(inputId) {
 async function guardarTarifa() {
   const st = document.getElementById("f_status"), btn = document.getElementById("f_guardar");
   try {
-    const { lista, enClickUp, residuos, sucursales } = leerFormulario();
+    const { lista, enClickUp, residuos, sucursales, nuevasSucursales } = leerFormulario();
+    const sinDir = nuevasSucursales.filter(x => !x.direccion && !x.comuna);
+    const conDirForm = nuevasSucursales.filter(x => x.direccion || x.comuna);
+    if (conDirForm.length > 1 && !FORM_ORIG && !confirm("Las sucursales nuevas " + conDirForm.map(x => x.sucursal).join(", ") + " quedarán con la dirección " + [conDirForm[0].direccion, conDirForm[0].comuna].filter(Boolean).join(", ") + ". ¿Continuar? (Si son distintas, cárgalas de a una.)")) return;
+    if (sinDir.length && !FORM_ORIG && !confirm("No hay dirección para: " + sinDir.map(x => x.sucursal).join(", ") + ". ¿Guardar igual? (La puedes completar después en Sucursales.)")) return;
     if (FORM_GRUPO) return await guardarGrupo(lista[0], residuos, sucursales, st, btn);
     if (!enClickUp && !FORM_ORIG && !confirm("“" + lista[0].proveedor_nombre + "” no está en ClickUp. ¿Guardar igual solo con el nombre?")) return;
     if (lista.length > 1 && !confirm("Se crearán " + lista.length + " tarifas (una por cada residuo, sucursal y comuna). ¿Continuar?")) return;
@@ -841,6 +893,7 @@ async function guardarTarifa() {
       st.textContent = r.ids.length + " tarifas guardadas.";
       await refrescarTrasGuardar(r.tarifas);
     }
+    await registrarSucursales(nuevasSucursales);
     if (FORM_COLA && FORM_COLA.length) siguienteDeCola(); else setTimeout(() => cerrarModal("tarifaModal"), 500);
   } catch (e) {
     st.textContent = "Error: " + e.message;
@@ -868,7 +921,7 @@ async function guardarGrupo(base, residuos, sucursales, st, btn) {
   Object.keys(deseadas).forEach(k => {
     if (existentes[k]) return;
     const { r, su } = deseadas[k];
-    const ref = grupo.find(t => norm(t.sucursal) === norm(su)) || {}; // la sucursal ya tenía dirección/comuna
+    const ref = sucursalInfo(comunes.cliente, su) || grupo.find(t => norm(t.sucursal) === norm(su)) || {}; // dirección conocida de la sucursal
     crear.push(Object.assign({}, comunes, { residuo: r, sucursal: su, direccion: tget(ref, "direccion"), comuna: tget(ref, "comuna"), region: tget(ref, "region") }));
   });
   if (!editar.length && !baja.length && !crear.length) { st.textContent = "Sin cambios."; return; }
@@ -891,6 +944,75 @@ async function guardarGrupo(base, residuos, sucursales, st, btn) {
   st.textContent = "Listo: " + resumen + ".";
   await refrescarTrasGuardar(r.tarifas);
   setTimeout(() => cerrarModal("tarifaModal"), 700);
+}
+
+/* ---------------- lista maestra de sucursales ---------------- */
+/** Guarda en la lista las sucursales que se usaron por primera vez (no rompe el guardado si falla). */
+async function registrarSucursales(nuevas) {
+  for (const n of (nuevas || [])) {
+    if (!n.empresa || !n.sucursal) continue;
+    if (SUCURSALES.some(x => norm(x.empresa) === norm(n.empresa) && norm(x.sucursal) === norm(n.sucursal))) continue;
+    try { const r = await api("sucursal_guardar", { sucursal: n, propagar: false }, true); SUCURSALES.push(r.sucursal); }
+    catch (e) { console.warn("No se pudo registrar la sucursal", n.sucursal, e.message); }
+  }
+}
+
+function abrirSucursales() {
+  const empresas = unicosOrdenados(SUCURSALES.map(x => x.empresa).concat(TARIFAS.map(t => t.cliente)));
+  abrirModal("sucModal",
+    '<h3>Sucursales</h3>' +
+    '<p class="small muted">La dirección y comuna de cada sucursal se usan al crear tarifas. Al guardar un cambio aquí también se actualizan sus tarifas activas.</p>' +
+    '<div class="tf-grid">' +
+      campo("s_emp", "Empresa", '<select id="s_emp" onchange="renderSucursales()">' + empresas.map(e => '<option>' + esc(e) + '</option>').join('') + '</select>') +
+      campo("s_buscar", "Buscar sucursal", '<input id="s_buscar" oninput="renderSucursales()" placeholder="Nombre...">') +
+    '</div>' +
+    '<div id="s_lista" style="margin-top:12px"></div>' +
+    '<h3 style="margin-top:16px;font-size:15px">+ Nueva sucursal</h3>' +
+    '<div class="tf-grid">' +
+      campo("s_n_suc", "Sucursal", '<input id="s_n_suc">') +
+      campo("s_n_com", "Comuna", '<input id="s_n_com" list="s_comDL">') +
+      campo("s_n_dir", "Dirección", '<input id="s_n_dir">', "span2") +
+    '</div><datalist id="s_comDL">' + COMUNAS_LISTA.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
+    '<div class="tf-acc"><span id="s_status" class="muted small"></span><button class="cbtn" onclick="guardarSucursal(null)">Agregar sucursal</button></div>');
+  renderSucursales();
+}
+
+function renderSucursales() {
+  const emp = (document.getElementById("s_emp") || {}).value || "";
+  const q = norm((document.getElementById("s_buscar") || {}).value || "");
+  const conocidas = {};
+  SUCURSALES.forEach(x => { if (norm(x.empresa) === norm(emp)) conocidas[norm(x.sucursal)] = x; });
+  // sucursales que solo existen en tarifas (aún no están en la lista)
+  TARIFAS.forEach(t => { if (t.activo && norm(t.cliente) === norm(emp) && t.sucursal && !conocidas[norm(t.sucursal)]) conocidas[norm(t.sucursal)] = { empresa: emp, sucursal: t.sucursal, direccion: t.direccion || "", comuna: t.comuna || "", soloTarifas: true }; });
+  const filas = Object.values(conocidas).filter(x => !q || norm(x.sucursal).indexOf(q) !== -1).sort((a, b) => a.sucursal.localeCompare(b.sucursal, "es"));
+  document.getElementById("s_lista").innerHTML = filas.length
+    ? '<div class="tscroll"><table class="ttar"><tr><th>Sucursal</th><th>Dirección</th><th>Comuna</th><th></th></tr>' + filas.map((x, i) =>
+        '<tr><td><b>' + esc(x.sucursal) + '</b>' + (x.soloTarifas ? '<div class="muted small">no estaba en la lista</div>' : '') + '</td>' +
+        '<td><input id="s_dir_' + i + '" value="' + esc(x.direccion) + '" data-suc="' + esc(x.sucursal) + '"></td>' +
+        '<td><input id="s_com_' + i + '" value="' + esc(x.comuna) + '" list="s_comDL"></td>' +
+        '<td><button class="lnk" onclick="guardarSucursal(' + i + ')">Guardar</button></td></tr>').join('') + '</table></div>'
+    : '<p class="muted small">Sin sucursales para esta empresa.</p>';
+}
+
+async function guardarSucursal(i) {
+  const st = document.getElementById("s_status");
+  const emp = (document.getElementById("s_emp") || {}).value || "";
+  let d;
+  if (i === null) d = { empresa: emp, sucursal: document.getElementById("s_n_suc").value.trim(), direccion: document.getElementById("s_n_dir").value.trim(), comuna: comunaCanonica(document.getElementById("s_n_com").value) };
+  else { const dir = document.getElementById("s_dir_" + i); d = { empresa: emp, sucursal: dir.dataset.suc, direccion: dir.value.trim(), comuna: comunaCanonica(document.getElementById("s_com_" + i).value) }; }
+  if (!d.empresa || !d.sucursal) { st.textContent = "Falta la empresa o la sucursal."; return; }
+  if (d.comuna && !regionDeComuna(d.comuna)) { st.textContent = "No reconozco la comuna “" + d.comuna + "”. Elígela de la lista."; return; }
+  d.region = regionDeComuna(d.comuna);
+  try {
+    st.textContent = "Guardando…";
+    const r = await api("sucursal_guardar", { sucursal: d, propagar: true }, true);
+    const k = norm(d.empresa) + "|" + norm(d.sucursal);
+    SUCURSALES = SUCURSALES.filter(x => norm(x.empresa) + "|" + norm(x.sucursal) !== k).concat([r.sucursal]);
+    st.textContent = "Guardado" + (r.tarifas.length ? " · " + r.tarifas.length + " tarifa(s) actualizadas" : "") + ".";
+    if (r.tarifas.length) await refrescarTrasGuardar(r.tarifas);
+    if (i === null) ["s_n_suc", "s_n_dir", "s_n_com"].forEach(id => { document.getElementById(id).value = ""; });
+    renderSucursales();
+  } catch (e) { st.textContent = "Error: " + e.message; }
 }
 
 /* ---------------- baja / historial ---------------- */
@@ -954,6 +1076,7 @@ function parsearBloqueClaude(txt) {
     if (base.detalle && l.detalle && l.detalle !== base.detalle) d.detalle = l.detalle + "\n" + base.detalle;
     const sup = buscarProveedorClickUp(d.proveedor_nombre);
     if (sup) { d._nombre_doc = d.proveedor_nombre; d.proveedor_id = sup.id; d.proveedor_nombre = sup.name; }
+    if (d.sucursal && !d.direccion && !d.comuna) { const si = sucursalInfo(d.cliente, d.sucursal); if (si) { d.direccion = si.direccion; d.comuna = si.comuna; } }
     if (!d.comuna && d.direccion) d.comuna = detectarComuna(d.direccion);
     d.comuna = comunaCanonica(d.comuna); d.region = regionDeComuna(d.comuna);
     d.precio = numDe(d.precio); d.cantidad_min = numDe(d.cantidad_min); d.cantidad_max = numDe(d.cantidad_max);
