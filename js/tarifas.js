@@ -966,16 +966,19 @@ function abrirSucursales() {
       campo("s_emp", "Empresa", '<select id="s_emp" onchange="renderSucursales()">' + empresas.map(e => '<option>' + esc(e) + '</option>').join('') + '</select>') +
       campo("s_buscar", "Buscar sucursal", '<input id="s_buscar" oninput="renderSucursales()" placeholder="Nombre...">') +
     '</div>' +
-    '<div id="s_lista" style="margin-top:12px"></div>' +
+    '<div id="s_status" class="small" style="margin-top:8px;font-weight:600;color:#047857"></div>' +
+    '<div id="s_lista" style="margin-top:8px"></div>' +
     '<h3 style="margin-top:16px;font-size:15px">+ Nueva sucursal</h3>' +
     '<div class="tf-grid">' +
       campo("s_n_suc", "Sucursal", '<input id="s_n_suc">') +
       campo("s_n_com", "Comuna", '<input id="s_n_com" list="s_comDL">') +
       campo("s_n_dir", "Dirección", '<input id="s_n_dir">', "span2") +
     '</div><datalist id="s_comDL">' + COMUNAS_LISTA.map(c => '<option value="' + esc(c) + '">').join('') + '</datalist>' +
-    '<div class="tf-acc"><span id="s_status" class="muted small"></span><button class="cbtn" onclick="guardarSucursal(null)">Agregar sucursal</button></div>');
+    '<div class="tf-acc"><button class="cbtn" data-txt="Agregar sucursal" onclick="guardarSucursal(null, this)">Agregar sucursal</button></div>');
   renderSucursales();
 }
+
+let SUC_GUARDADA = null; // { k, t, n } última sucursal guardada, para mostrar "✓ Guardado" en su fila
 
 function renderSucursales() {
   const emp = (document.getElementById("s_emp") || {}).value || "";
@@ -990,29 +993,36 @@ function renderSucursales() {
         '<tr><td><b>' + esc(x.sucursal) + '</b>' + (x.soloTarifas ? '<div class="muted small">no estaba en la lista</div>' : '') + '</td>' +
         '<td><input id="s_dir_' + i + '" value="' + esc(x.direccion) + '" data-suc="' + esc(x.sucursal) + '"></td>' +
         '<td><input id="s_com_' + i + '" value="' + esc(x.comuna) + '" list="s_comDL"></td>' +
-        '<td><button class="lnk" onclick="guardarSucursal(' + i + ')">Guardar</button></td></tr>').join('') + '</table></div>'
+        '<td class="acc">' + (SUC_GUARDADA && SUC_GUARDADA.k === norm(emp) + "|" + norm(x.sucursal) && Date.now() - SUC_GUARDADA.t < 15000
+          ? '<span class="ok-msg">✓ Guardado' + (SUC_GUARDADA.n ? ' · ' + SUC_GUARDADA.n + ' tarifa(s)' : '') + '</span>'
+          : '<button class="cbtn mini" onclick="guardarSucursal(' + i + ', this)">Guardar</button>') + '</td></tr>').join('') + '</table></div>'
     : '<p class="muted small">Sin sucursales para esta empresa.</p>';
 }
 
-async function guardarSucursal(i) {
+async function guardarSucursal(i, btn) {
   const st = document.getElementById("s_status");
+  if (btn) { if (btn.disabled) return; btn.disabled = true; btn.textContent = "Guardando…"; }
   const emp = (document.getElementById("s_emp") || {}).value || "";
   let d;
   if (i === null) d = { empresa: emp, sucursal: document.getElementById("s_n_suc").value.trim(), direccion: document.getElementById("s_n_dir").value.trim(), comuna: comunaCanonica(document.getElementById("s_n_com").value) };
   else { const dir = document.getElementById("s_dir_" + i); d = { empresa: emp, sucursal: dir.dataset.suc, direccion: dir.value.trim(), comuna: comunaCanonica(document.getElementById("s_com_" + i).value) }; }
-  if (!d.empresa || !d.sucursal) { st.textContent = "Falta la empresa o la sucursal."; return; }
-  if (d.comuna && !regionDeComuna(d.comuna)) { st.textContent = "No reconozco la comuna “" + d.comuna + "”. Elígela de la lista."; return; }
+  const fallo = msg => { st.textContent = msg; if (btn) { btn.disabled = false; btn.textContent = btn.dataset.txt || "Guardar"; } alert(msg); };
+  if (!d.empresa || !d.sucursal) return fallo("Falta la empresa o la sucursal.");
+  if (d.comuna && !regionDeComuna(d.comuna)) return fallo("No reconozco la comuna “" + d.comuna + "”. Elígela de la lista.");
   d.region = regionDeComuna(d.comuna);
   try {
     st.textContent = "Guardando…";
     const r = await api("sucursal_guardar", { sucursal: d, propagar: true }, true);
     const k = norm(d.empresa) + "|" + norm(d.sucursal);
     SUCURSALES = SUCURSALES.filter(x => norm(x.empresa) + "|" + norm(x.sucursal) !== k).concat([r.sucursal]);
-    st.textContent = "Guardado" + (r.tarifas.length ? " · " + r.tarifas.length + " tarifa(s) actualizadas" : "") + ".";
+    st.textContent = "✓ " + d.sucursal + " guardada" + (r.tarifas.length ? " · " + r.tarifas.length + " tarifa(s) actualizadas" : "") + ".";
+    SUC_GUARDADA = { k: k, t: Date.now(), n: r.tarifas.length };
+    if (btn && i === null) { btn.disabled = false; btn.textContent = "Agregar sucursal"; }
+    setTimeout(() => { if (document.getElementById("s_lista")) renderSucursales(); }, 15500);
     if (r.tarifas.length) await refrescarTrasGuardar(r.tarifas);
     if (i === null) ["s_n_suc", "s_n_dir", "s_n_com"].forEach(id => { document.getElementById(id).value = ""; });
     renderSucursales();
-  } catch (e) { st.textContent = "Error: " + e.message; }
+  } catch (e) { fallo("Error: " + e.message); }
 }
 
 /* ---------------- baja / historial ---------------- */

@@ -89,6 +89,10 @@ body.con-puerta { overflow:hidden; }
 .ttar tr.t-sub td { background:#fafafa; font-size:12px; }
 .ttar tr.t-sub td:first-child { border-left:3px solid #cfe0f5; padding-left:12px; }
 
+/* confirmaciones en filas */
+.ok-msg { color:#047857; font-weight:700; font-size:12px; white-space:nowrap; }
+.cbtn.mini { margin-top:0; padding:4px 10px; font-size:12px; }
+
 /* el proveedor paga al cliente */
 .t-paga { color:#047857; }
 .tgrupo.tg-paga { border-left:4px solid #10b981; }
