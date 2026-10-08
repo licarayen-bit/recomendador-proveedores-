@@ -179,7 +179,7 @@ async function loadTarifas() {
   }
   poblarFiltrosTarifas();
   renderTarifas();
-  if (typeof render === "function" && SUPPLIERS.length) render();
+  if (typeof render === "function" && SUPPLIERS.length) { aplicarTarifasAProveedores(); refreshProvDL(); populateFilters(); render(); }
 }
 
 function prepararTarifa(t) {
@@ -268,7 +268,7 @@ function calcularAlertas() {
 }
 
 function tarifasDeProveedor(s) {
-  return TARIFAS.filter(t => t.activo && (tget(t, "proveedor_id") ? t.proveedor_id === s.id : norm(t.proveedor_nombre) === norm(s.name)));
+  return TARIFAS.filter(t => t.activo && (tget(t, "proveedor_id") && !s.sheetOnly ? t.proveedor_id === s.id : norm(t.proveedor_nombre) === norm(s.name)));
 }
 
 /* ---------------- controles: selector con "Otro" y multiselector ---------------- */
@@ -377,7 +377,14 @@ function filaTarifaHtml(t, opts) {
     '</td></tr>';
 }
 
-const unicosOrdenados = vals => [...new Set(vals.map(v => String(v || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+/** Valores únicos sin distinguir mayúsculas/tildes; gana la forma más usada ("Euro Constructora" sobre "Euro constructora"). */
+function unicosOrdenados(vals) {
+  const formas = {};
+  vals.map(v => String(v || "").trim()).filter(Boolean).forEach(v => {
+    const k = norm(v); formas[k] = formas[k] || {}; formas[k][v] = (formas[k][v] || 0) + 1;
+  });
+  return Object.values(formas).map(f => Object.keys(f).sort((a, b) => f[b] - f[a])[0]).sort((a, b) => a.localeCompare(b, "es"));
+}
 
 function sucursalesDe(empresa) {
   const ne = norm(empresa);
@@ -455,7 +462,54 @@ function renderTarifas() {
   }).join('');
 }
 
-/* ---------------- integración con la lista de proveedores ---------------- */
+/* ---------------- integración con la lista de proveedores ----------------
+   Reemplaza al antiguo cruce con el Excel del ecosistema: los clientes de cada
+   proveedor y los gestores sin ficha en ClickUp salen de las tarifas activas. */
+function clientesDeProveedor(s) {
+  const vistos = {}, out = [];
+  tarifasDeProveedor(s).forEach(t => {
+    if (!t.cliente) return;
+    const k = norm(t.cliente) + "|" + norm(t.sucursal);
+    if (vistos[k]) return; vistos[k] = 1;
+    out.push([t.cliente, t.sucursal || ""]);
+  });
+  return out.sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1], "es"));
+}
+
+/** Aplica tarifas a SUPPLIERS: clientes y residuos, más los gestores que solo existen en tarifas. */
+function aplicarTarifasAProveedores() {
+  if (typeof SUPPLIERS === "undefined") return;
+  SUPPLIERS = SUPPLIERS.filter(s => !s.sheetOnly);
+  const conocidos = {};
+  SUPPLIERS.forEach(s => { conocidos[s.id] = s; conocidos["n:" + norm(s.name)] = s; });
+  const extra = {};
+  TARIFAS.filter(t => t.activo).forEach(t => {
+    if ((t.proveedor_id && conocidos[t.proveedor_id]) || conocidos["n:" + norm(t.proveedor_nombre)]) return;
+    const k = norm(t.proveedor_nombre); if (!k) return;
+    const e = extra[k] || (extra[k] = { name: t.proveedor_nombre, residuos: new Set() });
+    if (t.residuo) e.residuos.add(t.residuo);
+  });
+  Object.keys(extra).forEach(k => {
+    const e = extra[k], residuos = [...e.residuos];
+    SUPPLIERS.push({
+      id: "tar-" + k, name: e.name, url: "", estado: "planilla",
+      residuos, residuoTxt: "", areas: [], ubicTxt: "", direccion: "", cobertura: "",
+      ubicAll: "", residuosAll: residuos, estrellas: 0, puntaje: null,
+      situacion: "", movimiento: "", correo: "", telefono: "", web: "", rut: "",
+      clientes: [], score: 30, sheetOnly: true
+    });
+  });
+  SUPPLIERS.forEach(s => {
+    s.clientes = clientesDeProveedor(s);
+    const set = {}; (s.residuos || []).forEach(r => { set[norm(r)] = r; });
+    tarifasDeProveedor(s).forEach(t => { if (t.residuo && !set[norm(t.residuo)] && norm(t.residuo) !== "SINESPECIFICAR") set[norm(t.residuo)] = t.residuo; });
+    s.residuos = Object.values(set);
+  });
+}
+
+/** Empresas con tarifas activas (para el informe por empresa). */
+function empresasConTarifas() { return unicosOrdenados(TARIFAS.filter(t => t.activo).map(t => t.cliente)); }
+
 function tarifasResumenProveedor(s) {
   const ts = tarifasDeProveedor(s);
   if (!ts.length) return "";
