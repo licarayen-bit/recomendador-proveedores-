@@ -447,9 +447,9 @@ function filaTarifaHtml(t, opts) {
 }
 
 /* ---------- filas agrupadas: mismas condiciones en varias sucursales y/o residuos ---------- */
-/** Condiciones que deben coincidir para juntar tarifas (varían residuo, sucursal, lugar, fecha y detalle). */
+/** Condiciones que deben coincidir para juntar tarifas (varían residuo, contenedor, sucursal, lugar, fecha y detalle). */
 function condKey(t) {
-  return [t.provKey, norm(t.cliente), norm(t.unidad), norm(t.contenedor), t.precio_num ?? "", t.moneda,
+  return [t.provKey, norm(t.cliente), norm(t.unidad), t.precio_num ?? "", t.moneda,
     t.incluye_transporte, t.incluye_disposicion, t.tipo, norm(t.estado_servicio), t.cantidad_min_num ?? "", t.cantidad_max_num ?? ""].join("|");
 }
 /** Junta una lista en grupos por condiciones (más vigencia/baja, para no mezclar históricos). */
@@ -482,7 +482,7 @@ function filaGrupoHtml(ts, opts) {
     (opts.sinProveedor ? '' : '<td><b>' + esc(t0.proveedor_nombre || "-") + '</b>' + (opts.best ? ' <span class="t-best">★ ' + (t0.tipo === "paga" ? "paga más" : "menor") + '</span>' : '') + '</td>') +
     '<td>' + estadoServicioPill(t0) + (t0.estado_servicio ? ' ' : '') + (t0.cliente ? '<b>' + esc(t0.cliente) + '</b>' : '<span class="muted">sin empresa</span>') +
       (nSuc ? '<div class="small">' + listaCorta(sucursales, 4) + '</div>' : '') + '</td>' +
-    (opts.conServicio ? '<td>' + listaCorta(residuos, 4) + (t0.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '<div class="muted small">' + esc([t0.contenedor, siNoTxt(t0.incluye_transporte, "transp."), siNoTxt(t0.incluye_disposicion, "disp.")].filter(Boolean).join(" · ")) + '</div></td>' : '') +
+    (opts.conServicio ? '<td>' + listaCorta(residuos, 4) + (t0.tipo === "paga" ? ' <span class="pill p-paga">paga</span>' : '') + '<div class="muted small">' + [listaCorta(ts.map(t => t.contenedor), 3), esc(siNoTxt(t0.incluye_transporte, "transp.")), esc(siNoTxt(t0.incluye_disposicion, "disp."))].filter(Boolean).join(" · ") + '</div></td>' : '') +
     '<td>' + (listaCorta(ts.map(t => t.comuna), 3) || "-") + '</td>' +
     '<td class="num">' + precioHtml(t0) + '</td>' +
     '<td><span class="small">' + esc(t0.fecha || "-") + '</span><div class="muted small">' + esc(t0.fuente || "") + (pdfs.length === 1 ? ' · <a href="' + esc(pdfs[0]) + '" target="_blank" rel="noopener">PDF</a>' : pdfs.length ? ' · ' + pdfs.length + ' PDF' : '') + '</div></td>' +
@@ -696,6 +696,7 @@ function abrirFormGrupo(id) {
   const grupo = TARIFAS.filter(x => x.activo && condKey(x) === k);
   abrirFormTarifa(null, Object.assign({}, t, {
     residuos: unicosOrdenados(grupo.map(x => x.residuo)), sucursales: unicosOrdenados(grupo.map(x => x.sucursal)),
+    contenedores: unicosOrdenados(grupo.map(x => x.contenedor)),
     precio: t.precio_num == null ? "" : t.precio_num, cantidad_min: t.cantidad_min_num ?? "", cantidad_max: t.cantidad_max_num ?? "", tipo_transaccion: t.tipo
   }), grupo);
 }
@@ -711,12 +712,13 @@ function abrirFormTarifa(id, prefill, grupo) {
   const sn = [["si", "Sí"], ["no", "No"]]; // por defecto Sí, salvo que la cotización lo excluya
   if (!t && !FORM_GRUPO) { v.incluye_transporte = siNo(v.incluye_transporte) || "si"; v.incluye_disposicion = siNo(v.incluye_disposicion) || "si"; }
   const sucursales = [].concat(v.sucursales || v.sucursal || []).filter(Boolean);
+  const contenedores = [].concat(v.contenedores || v.contenedor || []).filter(Boolean);
   const multi = !t; // al crear o editar un grupo se eligen varios residuos/sucursales (una tarifa por combinación)
   const enGrupo = !!FORM_GRUPO;
   abrirModal("tarifaModal",
     '<h3>' + (t ? "Editar tarifa" : enGrupo ? "Editar grupo (" + FORM_GRUPO.length + " tarifas)" : "Nueva tarifa") + (FORM_COLA && FORM_COLA.length ? ' <span class="muted small">(' + FORM_COLA.length + ' pendiente(s) desde Claude)</span>' : '') + '</h3>' +
     (t ? '<div class="muted small">' + esc(t.id) + ' · creada por ' + esc(t.creado_por) + ' el ' + esc(t.creado_el) + '</div>' : '') +
-    (enGrupo ? '<div class="muted small">Los cambios se aplican a todas. Agregar una sucursal o residuo crea sus tarifas; quitarlo las da de baja. La dirección y comuna de cada sucursal se mantienen.</div>' : '') +
+    (enGrupo ? '<div class="muted small">Los cambios se aplican a todas. Agregar una sucursal, residuo o contenedor crea sus tarifas; quitarlo las da de baja. La dirección y comuna de cada sucursal se mantienen.</div>' : '') +
     '<div class="tf-grid">' +
       campo("f_proveedor", "Proveedor *", inp("f_proveedor", v.proveedor_nombre, 'list="provDL" autocomplete="off"'), "span2") +
       campo("f_tipo", "Tipo de transacción", sel("f_tipo", [["cobra", "Cobra: el cliente paga al proveedor"], ["paga", "Paga: el proveedor paga al cliente"]], v.tipo_transaccion)) +
@@ -725,7 +727,7 @@ function abrirFormTarifa(id, prefill, grupo) {
       campo("f_cliente", "Empresa", inp("f_cliente", v.cliente, 'list="clienteDL" autocomplete="off" placeholder="Ej: COPEC" oninput="mselOpciones(\'f_sucursales\', sucursalesDe(this.value))"'), "dep-cliente") +
       campo("f_sucursales", multi ? "Sucursal(es) <span class=\"muted\">· varias = una tarifa por cada una</span>" : "Sucursal", mselHtml("f_sucursales", { opciones: sucursalesDe(v.cliente), valores: sucursales, otro: true, unico: !multi, placeholder: "+ elegir sucursal", onChange: alCambiarSucursales }) + '<div id="f_suc_info" class="small muted"></div>', "dep-cliente span2") +
       campo("f_residuos", multi ? "Residuo(s) * <span class=\"muted\">· varios = una tarifa por cada uno</span>" : "Residuo *", mselHtml("f_residuos", { opciones: CATS.residuo || [], valores: residuos, otro: true, unico: !multi, placeholder: "+ elegir residuo" }), "span2") +
-      campo("f_contenedor", "Contenedor / vehículo", selOtroHtml("f_contenedor", CATS.contenedor, v.contenedor, "-")) +
+      campo("f_contenedores", multi ? "Contenedor(es) / vehículo(s) <span class=\"muted\">· varios = una tarifa por cada uno</span>" : "Contenedor / vehículo", mselHtml("f_contenedores", { opciones: CATS.contenedor || [], valores: contenedores, otro: true, unico: !multi, placeholder: "+ elegir contenedor o vehículo" }), "span2") +
       campo("f_unidad", "Unidad de cobro", selOtroHtml("f_unidad", CATS.unidad, v.unidad, "-")) +
       (enGrupo ? '' :
       campo("f_direccion", "Dirección del servicio", inp("f_direccion", v.direccion, 'placeholder="Calle, número, comuna" oninput="autoComuna()"'), "span2") +
@@ -803,7 +805,7 @@ function leerFormulario() {
     proveedor_id: sup ? sup.id : "", proveedor_nombre: sup ? sup.name : nombre,
     tipo_transaccion: g("f_tipo"), estado_servicio: selOtroVal("f_estado_servicio"),
     cliente: g("f_cliente"), estado_cliente: selOtroVal("f_estado_cliente"),
-    contenedor: selOtroVal("f_contenedor"), unidad: selOtroVal("f_unidad"),
+    unidad: selOtroVal("f_unidad"),
     direccion: g("f_direccion"),
     precio: g("f_precio") === "" ? "" : numDe(g("f_precio")), moneda: g("f_moneda"),
     cantidad_min: g("f_cantidad_min") === "" ? "" : numDe(g("f_cantidad_min")),
@@ -818,6 +820,8 @@ function leerFormulario() {
   const sucursales = general ? [] : mselValores("f_sucursales");
   validarEstadoServicio(Object.assign({}, base, { sucursal: sucursales[0] || "" }));
   const residuos = mselValores("f_residuos");
+  const contenedores = mselValores("f_contenedores");
+  const conts = contenedores.length ? contenedores : [""];
   if (!residuos.length) throw new Error("Elige al menos un residuo.");
   const comunas = mselValores("f_comunas");
   const lista = [], nuevasSucursales = [];
@@ -830,14 +834,14 @@ function leerFormulario() {
       const lugar = conocida ? { direccion: d.direccion, comuna: d.comuna, region: d.region }
                              : { direccion: base.direccion, comuna: comunaForm, region: regionDeComuna(comunaForm) };
       if (!d || !d.enLista) nuevasSucursales.push(Object.assign({ empresa: base.cliente, sucursal: su }, lugar));
-      residuos.forEach(r => lista.push(Object.assign({}, base, lugar, { residuo: r, sucursal: su })));
+      residuos.forEach(r => conts.forEach(co => lista.push(Object.assign({}, base, lugar, { residuo: r, contenedor: co, sucursal: su }))));
     });
   } else {
-    residuos.forEach(r => (comunas.length ? comunas : [""]).forEach(c => {
-      lista.push(Object.assign({}, base, { residuo: r, sucursal: "", comuna: c, region: regionDeComuna(c) }));
-    }));
+    residuos.forEach(r => conts.forEach(co => (comunas.length ? comunas : [""]).forEach(c => {
+      lista.push(Object.assign({}, base, { residuo: r, contenedor: co, sucursal: "", comuna: c, region: regionDeComuna(c) }));
+    })));
   }
-  return { lista, enClickUp: !!sup, residuos, sucursales, nuevasSucursales };
+  return { lista, enClickUp: !!sup, residuos, sucursales, contenedores, nuevasSucursales };
 }
 
 async function asegurarCatalogos(datos) {
@@ -864,14 +868,14 @@ async function subirPdfSiHay(inputId) {
 async function guardarTarifa() {
   const st = document.getElementById("f_status"), btn = document.getElementById("f_guardar");
   try {
-    const { lista, enClickUp, residuos, sucursales, nuevasSucursales } = leerFormulario();
+    const { lista, enClickUp, residuos, sucursales, contenedores, nuevasSucursales } = leerFormulario();
     const sinDir = nuevasSucursales.filter(x => !x.direccion && !x.comuna);
     const conDirForm = nuevasSucursales.filter(x => x.direccion || x.comuna);
     if (conDirForm.length > 1 && !FORM_ORIG && !confirm("Las sucursales nuevas " + conDirForm.map(x => x.sucursal).join(", ") + " quedarán con la dirección " + [conDirForm[0].direccion, conDirForm[0].comuna].filter(Boolean).join(", ") + ". ¿Continuar? (Si son distintas, cárgalas de a una.)")) return;
     if (sinDir.length && !FORM_ORIG && !confirm("No hay dirección para: " + sinDir.map(x => x.sucursal).join(", ") + ". ¿Guardar igual? (La puedes completar después en Sucursales.)")) return;
-    if (FORM_GRUPO) return await guardarGrupo(lista[0], residuos, sucursales, st, btn);
+    if (FORM_GRUPO) return await guardarGrupo(lista[0], residuos, sucursales, contenedores, st, btn);
     if (!enClickUp && !FORM_ORIG && !confirm("“" + lista[0].proveedor_nombre + "” no está en ClickUp. ¿Guardar igual solo con el nombre?")) return;
-    if (lista.length > 1 && !confirm("Se crearán " + lista.length + " tarifas (una por cada residuo, sucursal y comuna). ¿Continuar?")) return;
+    if (lista.length > 1 && !confirm("Se crearán " + lista.length + " tarifas (una por cada residuo, contenedor, sucursal y comuna). ¿Continuar?")) return;
     btn.disabled = true; st.textContent = "Guardando…";
     if (!sesionActiva()) await iniciarSesion();
     for (const d of lista) await asegurarCatalogos(d);
@@ -902,17 +906,17 @@ async function guardarTarifa() {
 }
 
 /** Edición en grupo: aplica los datos comunes a todas, crea las combinaciones nuevas y da de baja las quitadas. */
-async function guardarGrupo(base, residuos, sucursales, st, btn) {
+async function guardarGrupo(base, residuos, sucursales, contenedores, st, btn) {
   const grupo = FORM_GRUPO;
-  const clave = (r, su) => norm(r) + "|" + norm(su);
+  const clave = (r, co, su) => norm(r) + "|" + norm(co) + "|" + norm(su);
   const deseadas = {};
-  residuos.forEach(r => (sucursales.length ? sucursales : [""]).forEach(su => { deseadas[clave(r, su)] = { r, su }; }));
+  residuos.forEach(r => (contenedores.length ? contenedores : [""]).forEach(co => (sucursales.length ? sucursales : [""]).forEach(su => { deseadas[clave(r, co, su)] = { r, co, su }; })));
   const comunes = Object.assign({}, base);
-  ["residuo", "sucursal", "direccion", "comuna", "region"].forEach(k => delete comunes[k]);
+  ["residuo", "contenedor", "sucursal", "direccion", "comuna", "region"].forEach(k => delete comunes[k]);
   const antes = (t, k) => k === "precio" ? t.precio_num : k === "cantidad_min" ? t.cantidad_min_num : k === "cantidad_max" ? t.cantidad_max_num : k === "tipo_transaccion" ? t.tipo : tget(t, k);
   const editar = [], baja = [], crear = [], existentes = {};
   grupo.forEach(t => {
-    const k = clave(t.residuo, t.sucursal);
+    const k = clave(t.residuo, t.contenedor, t.sucursal);
     if (!deseadas[k]) { baja.push(t.id); return; }
     existentes[k] = true;
     const cambios = {};
@@ -921,9 +925,9 @@ async function guardarGrupo(base, residuos, sucursales, st, btn) {
   });
   Object.keys(deseadas).forEach(k => {
     if (existentes[k]) return;
-    const { r, su } = deseadas[k];
+    const { r, co, su } = deseadas[k];
     const ref = sucursalInfo(comunes.cliente, su) || grupo.find(t => norm(t.sucursal) === norm(su)) || {}; // dirección conocida de la sucursal
-    crear.push(Object.assign({}, comunes, { residuo: r, sucursal: su, direccion: tget(ref, "direccion"), comuna: tget(ref, "comuna"), region: tget(ref, "region") }));
+    crear.push(Object.assign({}, comunes, { residuo: r, contenedor: co, sucursal: su, direccion: tget(ref, "direccion"), comuna: tget(ref, "comuna"), region: tget(ref, "region") }));
   });
   if (!editar.length && !baja.length && !crear.length) { st.textContent = "Sin cambios."; return; }
   const resumen = [editar.length && editar.length + " se actualizan", crear.length && crear.length + " se crean", baja.length && baja.length + " se dan de baja"].filter(Boolean).join(", ");
@@ -1071,12 +1075,13 @@ function parsearBloqueClaude(txt) {
   if (!lineas.length) throw new Error("El bloque no trae tarifas.");
   const comun = {};
   ["proveedor_nombre", "proveedor", "cliente", "empresa", "sucursal", "tipo_transaccion", "estado_servicio", "estado_cliente", "direccion", "comuna", "fecha", "fuente", "moneda", "detalle", "incluye_transporte", "incluye_disposicion"].forEach(k => { if (base[k] != null && base[k] !== "") comun[k === "proveedor" ? "proveedor_nombre" : k] = base[k]; });
-  // Una línea puede traer listas en "residuo" y "comuna": una tarifa por combinación.
+  // Una línea puede traer listas en "residuo", "contenedor" y "comuna": una tarifa por combinación.
   const expandidas = [];
   lineas.forEach(l => {
     const res = [].concat(l.residuo == null ? "" : l.residuo);
     const com = [].concat(l.comuna == null || l.comuna === "" ? (comun.comuna || "") : l.comuna);
-    res.forEach(r => com.forEach(c => expandidas.push(Object.assign({}, l, { residuo: r, comuna: c }))));
+    const con = [].concat(l.contenedor == null ? "" : l.contenedor);
+    res.forEach(r => con.forEach(co => com.forEach(c => expandidas.push(Object.assign({}, l, { residuo: r, contenedor: co, comuna: c })))));
   });
   return expandidas.map(l => {
     const d = Object.assign({}, comun, l);
