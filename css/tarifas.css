@@ -129,3 +129,17 @@ tr.abierta .t-flecha { transform:rotate(90deg); }
   .tmodal .modalinner { padding:18px 16px; }
   #ufInfo { margin-left:0; width:100%; }
 }
+
+/* Sinader */
+.b-sinader { background:#e0f2fe; color:#075985; cursor:help; }
+.chip.sin-inact { background:#f3f4f6; color:#98a2b3; text-decoration:line-through; }
+.sin-det { border-left:3px solid #bae6fd; padding-left:8px; margin:6px 0; }
+.chip.sin-trat b { font-weight:700; }
+.chip.sin-trat .sin-sep { opacity:.5; }
+/* Pestaña Sinader: letra más grande que el resto */
+#viewSin .name { font-size:18px; }
+#viewSin .meta { font-size:14px; }
+#viewSin .badge { font-size:12.5px; padding:4px 10px; }
+#viewSin .chip { font-size:13px; padding:3px 9px; }
+#viewSin .cbtn.mini { font-size:13px; }
+#viewSin .count { font-size:13px; }

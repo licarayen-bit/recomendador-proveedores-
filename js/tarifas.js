@@ -1213,9 +1213,11 @@ function siguienteDeCola() {
 function mostrarVista(v) {
   document.getElementById("viewProv").style.display = v === "prov" ? "" : "none";
   document.getElementById("viewTar").style.display = v === "tar" ? "" : "none";
+  document.getElementById("viewSin").style.display = v === "sin" ? "" : "none";
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   lsSet("rp_vista", v);
   if (v === "tar") renderTarifas();
+  if (v === "sin") renderSinader();
 }
 
 function tarifasInit() {
@@ -1225,6 +1227,8 @@ function tarifasInit() {
   ["tfRegion", "tfUnidad", "tfEstado", "tfTipo", "tfServicio", "tfAnteriores", "tfBajas", "tfAlertas"].forEach(id => document.getElementById(id).addEventListener("change", renderTarifas));
   ["tfTexto", "tfSucursal"].forEach(id => document.getElementById(id).addEventListener("input", renderTarifas));
   document.getElementById("tfEmpresa").addEventListener("input", e => { actualizarSucursalDL("tfSucursalDL", e.target.value); renderTarifas(); });
-  if (lsGet("rp_vista") === "tar") mostrarVista("tar");
+  sinaderInit();
+  const vista = lsGet("rp_vista");
+  if (vista === "tar" || vista === "sin") mostrarVista(vista);
   loadUF();
 }
