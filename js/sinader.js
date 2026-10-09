@@ -121,9 +121,10 @@ function sinaderOpciones() {
   opciones("sfN3", unicos(ts.filter(t => (!n1 || t.n1 === n1) && (!n2 || t.n2 === n2)).map(t => t.n3)).sort(porCod(3)), "Todos", et(3));
 }
 
-function sinaderFiltrados() {
+/** sinEco=true ignora el filtro "En ecosistema" (lo usa el resumen, que siempre muestra ambos lados). */
+function sinaderFiltrados(sinEco) {
   const txt = norm(sinVal("sfTexto")), txtRut = rutClave(sinVal("sfTexto")), reg = sinVal("sfRegion"), com = sinVal("sfComuna");
-  const n1 = sinVal("sfN1"), n2 = sinVal("sfN2"), n3 = sinVal("sfN3"), eco = sinVal("sfEco");
+  const n1 = sinVal("sfN1"), n2 = sinVal("sfN2"), n3 = sinVal("sfN3"), eco = sinEco ? "" : sinVal("sfEco");
   const soloAct = (document.getElementById("sfActivos") || {}).checked;
   const ruts = rutsEcosistema();
   const out = [];
@@ -168,6 +169,7 @@ function renderSinader() {
   sinaderOpciones();
   const rows = sinaderFiltrados();
   SIN_GRUPOS = sinaderAgrupar(rows);
+  renderSinaderResumen();
   cnt.textContent = SIN_GRUPOS.length + " empresa(s) · " + rows.length + " establecimiento(s) de " + SINADER.length + " · fuente: descarga SINADER 8-10-26";
   if (!rows.length) { list.innerHTML = '<div class="empty">Sin resultados para el filtro actual.</div>'; return; }
   list.innerHTML = SIN_GRUPOS.slice(0, SIN_MOSTRAR).map((g, i) => {
@@ -185,6 +187,32 @@ function renderSinader() {
     '</div>';
   }).join('') +
     (SIN_GRUPOS.length > SIN_MOSTRAR ? '<div style="text-align:center"><button class="cbtn sec" onclick="SIN_MOSTRAR+=' + SIN_PAGINA + ';renderSinader()">Mostrar más (' + (SIN_GRUPOS.length - SIN_MOSTRAR) + ' empresas restantes)</button></div>' : '');
+}
+
+/** Resumen en ecosistema / fuera según los filtros actuales (salvo "En ecosistema"). Clic = filtrar ese lado. */
+function renderSinaderResumen() {
+  const el = document.getElementById("sinResumen"); if (!el) return;
+  const rows = sinaderFiltrados(true);
+  const grupos = sinaderAgrupar(rows);
+  const lado = en => ({ emp: grupos.filter(g => g.en === en).length, est: rows.filter(r => r.en === en).length });
+  const si = lado(true), no = lado(false), tot = si.emp + no.emp;
+  const pct = n => tot ? Math.round(n * 100 / tot) + "%" : "–";
+  const eco = sinVal("sfEco");
+  const tile = (v, cls, titulo, d) =>
+    '<button class="sin-tile ' + cls + (eco === v ? ' on' : '') + '" onclick="filtrarEcoSinader(\'' + v + '\')" title="' + (eco === v ? 'Quitar filtro' : 'Ver solo estos') + '">' +
+      '<div class="sin-tile-lbl">' + titulo + '</div>' +
+      '<div class="sin-tile-num">' + d.emp.toLocaleString("es-CL") + ' <span>gestores · ' + pct(d.emp) + '</span></div>' +
+      '<div class="sin-tile-sub">' + d.est.toLocaleString("es-CL") + ' establecimiento' + (d.est === 1 ? '' : 's') + '</div>' +
+    '</button>';
+  const filtros = [sinVal("sfComuna") || sinVal("sfRegion")].filter(Boolean);
+  el.innerHTML = tile("si", "in", "En nuestro ecosistema", si) + tile("no", "out", "Fuera del ecosistema", no) +
+    '<div class="sin-tile-nota">' + tot.toLocaleString("es-CL") + ' gestores' + (filtros.length ? ' en ' + esc(filtros[0]) : ' en todo Chile') +
+    ' · cruce por RUT: un proveedor sin RUT en ClickUp cuenta como "fuera"</div>';
+}
+function filtrarEcoSinader(v) {
+  const sel = document.getElementById("sfEco");
+  sel.value = sel.value === v ? "" : v;
+  sel.dispatchEvent(new Event("change"));
 }
 
 /** Copia los datos de la empresa y sus establecimientos (los que cumplen el filtro) para ClickUp o la skill de bienvenida. */

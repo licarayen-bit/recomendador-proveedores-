@@ -143,3 +143,15 @@ tr.abierta .t-flecha { transform:rotate(90deg); }
 #viewSin .chip { font-size:13px; padding:3px 9px; }
 #viewSin .cbtn.mini { font-size:13px; }
 #viewSin .count { font-size:13px; }
+/* Resumen Sinader: en / fuera del ecosistema */
+.sin-resumen { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0 0 12px; }
+.sin-tile { text-align:left; background:#fff; border:1px solid #e5e7eb; border-left:4px solid; border-radius:10px; padding:12px 14px; cursor:pointer; font:inherit; }
+.sin-tile.in { border-left-color:#0284c7; }
+.sin-tile.out { border-left-color:#98a2b3; }
+.sin-tile.on { background:#f0f9ff; border-color:#7dd3fc; }
+.sin-tile-lbl { font-size:12px; font-weight:600; color:#667085; text-transform:uppercase; letter-spacing:.04em; }
+.sin-tile-num { font-size:28px; font-weight:700; color:#1c2128; line-height:1.2; margin-top:2px; font-variant-numeric:tabular-nums; }
+.sin-tile-num span { font-size:14px; font-weight:500; color:#475467; }
+.sin-tile-sub { font-size:13px; color:#475467; }
+.sin-tile-nota { grid-column:1/-1; font-size:12px; color:#667085; }
+@media (max-width:600px) { .sin-resumen { grid-template-columns:1fr; } }
