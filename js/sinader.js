@@ -201,12 +201,12 @@ function renderSinaderResumen() {
   const tile = (v, cls, titulo, d) =>
     '<button class="sin-tile ' + cls + (eco === v ? ' on' : '') + '" onclick="filtrarEcoSinader(\'' + v + '\')" title="' + (eco === v ? 'Quitar filtro' : 'Ver solo estos') + '">' +
       '<div class="sin-tile-lbl">' + titulo + '</div>' +
-      '<div class="sin-tile-num">' + d.emp.toLocaleString("es-CL") + ' <span>gestores · ' + pct(d.emp) + '</span></div>' +
+      '<div class="sin-tile-num">' + d.emp.toLocaleString("es-CL") + ' <span>gestor' + (d.emp === 1 ? '' : 'es') + ' · ' + pct(d.emp) + '</span></div>' +
       '<div class="sin-tile-sub">' + d.est.toLocaleString("es-CL") + ' establecimiento' + (d.est === 1 ? '' : 's') + '</div>' +
     '</button>';
   const filtros = [sinVal("sfComuna") || sinVal("sfRegion")].filter(Boolean);
   el.innerHTML = tile("si", "in", "En nuestro ecosistema", si) + tile("no", "out", "Fuera del ecosistema", no) +
-    '<div class="sin-tile-nota">' + tot.toLocaleString("es-CL") + ' gestores' + (filtros.length ? ' en ' + esc(filtros[0]) : ' en todo Chile') +
+    '<div class="sin-tile-nota">' + tot.toLocaleString("es-CL") + ' gestor' + (tot === 1 ? '' : 'es') + (filtros.length ? ' en ' + esc(filtros[0]) : ' en todo Chile') +
     ' · cruce por RUT: un proveedor sin RUT en ClickUp cuenta como "fuera"</div>';
 }
 function filtrarEcoSinader(v) {
